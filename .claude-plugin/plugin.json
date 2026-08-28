@@ -1,0 +1,9 @@
+{
+  "name": "hrforai-agent",
+  "version": "1.0.0",
+  "description": "HR for AI — Employee Agent. Answers your manager's AI daily check-in questions using local evidence (Claude Code sessions, Screen Time, browser history, git). Only sanitized, business-level answers ever leave your machine — never raw code, chats, URLs, or personal detail. Contains no manager logic and produces no reports.",
+  "author": {
+    "name": "Sergei Sherman",
+    "email": "sergei@in3d.io"
+  }
+}

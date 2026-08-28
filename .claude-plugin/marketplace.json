@@ -1,0 +1,14 @@
+{
+  "name": "hrforai",
+  "owner": {
+    "name": "Sergei Sherman",
+    "email": "sergei@in3d.io"
+  },
+  "plugins": [
+    {
+      "name": "hrforai-agent",
+      "source": "./",
+      "description": "Employee-side agent for the HR-for-AI daily check-in. Sanitized answers only; no manager logic on this machine."
+    }
+  ]
+}
