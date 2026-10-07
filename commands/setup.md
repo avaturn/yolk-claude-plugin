@@ -8,12 +8,12 @@ Set up the HR-for-AI Employee Agent on this machine. This is the ONE approval mo
 1. **Explain what the user is approving** (be transparent — this answers work-monitoring questions from their manager's AI):
    - A local agent will read Claude Code session history (`~/.claude/projects`), macOS Screen Time stats, Chrome browsing history (domains, page titles, timing — used to reconstruct the workday), local git activity, and any cloud connectors already configured, to answer questions posted by the Manager AI.
    - Only sanitized, business-level answers leave this machine (meeting subjects, doc titles, client names) — never raw code, chats, email/message bodies, URLs, or secrets. Personal browsing is reported only in aggregate ("~30 min personal"). A deterministic sanitizer enforces this on top of the agent's rules, and every outgoing answer is auditable in `~/.hrforai/audit/` and in the exchange repo.
-   - This plugin contains NO manager logic, gets NO reports back, and needs NO API key — investigations run on the user's own Claude subscription.
+   - This plugin contains NO manager logic and needs NO API key — investigations run on the user's own Claude subscription. The manager's daily report about them, and a coach brief built from it, are delivered back into their own exchange repo (`reports/`, `briefs/`) — they read exactly what the manager reads, with `yolk brief` / `yolk report`. Nobody else's data is in their repo, and nobody else can see theirs.
    - Ask for explicit confirmation before continuing.
 
 2. **Exchange repo**: use `$ARGUMENTS` if it looks like `owner/repo`, otherwise ask the user which private exchange repo their manager gave them. Verify access with `gh repo view <repo>` (if `gh` is missing or unauthenticated, help them install/`gh auth login` first).
 
-3. **Employee id**: ask the user for their id (agree with the manager; default: their first name, lowercase).
+3. **Employee id**: if the repo is named `hrforai-exchange-<id>` (one private repo per employee — the standard team setup), the id is `<id>`: confirm it with the user rather than asking. Otherwise ask for it (agree with the manager; default: their first name, lowercase). It must match the manager's registration exactly.
 
 4. **Profile** (critical for fair, accurate evaluation): ask for their name and role, and what "real work" looks like for that role. **Timezone**: detect with `readlink /etc/localtime` (strip up to `zoneinfo/`), confirm with the user (employees may be in Israel, Italy, Kyrgyzstan…), and let them override with any IANA timezone. Write `~/.hrforai/profile.md`:
    ```

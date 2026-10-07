@@ -16,8 +16,9 @@ A deterministic sanitizer strips code blocks and secret patterns on top of the
 agent's rules. Every payload sent is auditable in `~/.hrforai/audit/` and in the
 exchange repo's `outbox/`.
 
-This plugin contains **no manager logic**, receives **no reports**, and needs
-**no API key** — investigations run on your own Claude subscription.
+This plugin contains **no manager logic** and needs **no API key** — investigations run on your own Claude subscription. Your manager's daily
+report about you and your coach brief come back into your own exchange repo
+(`reports/`, `briefs/`), readable with `yolk report` / `yolk brief`.
 
 ## Install
 
