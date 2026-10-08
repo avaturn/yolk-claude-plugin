@@ -74,7 +74,7 @@ background poller runs it). Check with `claude --version`.
 | Command | What it does |
 |---|---|
 | `/yolk:setup <code>` | Consent, link this Mac with the invite, install the background poller (starts at once, at every login, and every 20 min) |
-| `/yolk:brief [date]` | Your coach brief |
+| `/yolk:brief [date]` | Your coach brief; if none has arrived yet it says what the poller is doing and tells you when it is ready |
 | `/yolk:report [date]` | Your own daily activity report (the local summary of a day) |
 | `/yolk:leave` | Revoke this Mac's token and stop the poller |
 
@@ -116,6 +116,12 @@ removes it for good). With auto-update on, nothing else is needed. By hand: `cla
 updates the plugin (`claude plugin marketplace update yolk` only refreshes the catalog); a new session
 loads it, or run `/reload-plugins`. The two prompts the agent gives
 Claude live in `charters/`, not `agents/`, so they do not show up as subagents in your sessions.
+
+**What is happening now.** The poller writes `~/.claude/yolk/status.json` (phase, date, check-in dates; never content).
+`employee_runner.py status` prints it with live facts (poll running, activity reports ready, briefs, open
+check-ins); `status --wait N` waits up to N seconds for a running poll to finish, then for an open check-in's
+brief. `/yolk:brief`, `/yolk:report` and `/yolk:setup` run it in the background and the session tells you when
+the result is ready. `status` never heals the poller.
 
 ## For admins
 

@@ -1,6 +1,6 @@
 {
   "name": "yolk",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "Yolk — Employee Agent. Answers your manager's AI daily check-in questions using local evidence (Claude Code sessions, Screen Time, browser history, git). Your manager sees only your sanitized answers and a team digest; you see your own daily activity report (built locally) and your coach brief. Raw activity data and daily summaries are never sent to Yolk or your manager; they are processed by Claude under your own account. Contains no manager logic.",
   "author": {
     "name": "Sergei Sherman",

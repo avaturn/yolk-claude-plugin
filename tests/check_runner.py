@@ -11,6 +11,7 @@ import plistlib
 import shutil
 import sys
 import tempfile
+import urllib.error
 import time as time_mod
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -733,6 +734,154 @@ def check_install_script_plist():
     shutil.rmtree(home, ignore_errors=True)
 
 
+def check_status_phases(scripts):
+    clean_dirs()
+    r.STATUS_FILE.unlink(missing_ok=True)
+    today = r.summary_today(CFG)
+    qdate = (today - timedelta(days=2)).isoformat()
+    marker = "STATUS-LEAK-MARKER"
+    seen = []
+
+    def api(cfg, method, path, body=None, auth=True):
+        if path.startswith("/v1/questions/pending"):
+            return 200, {"question_sets": [{"id": "qs_s", "date": qdate, "round": 1, "questions": []}]}
+        return (200, {"briefs": []}) if path.startswith("/v1/briefs") else (201, None)
+
+    def claude(prompt, sid, verbose, what, **kw):
+        st = r.read_status()
+        seen.append((st["phase"], st["date"]))
+        return json.dumps({"overview": marker})
+
+    def investigate(qs, profile, tz, verbose):
+        st = r.read_status()
+        seen.append((st["phase"], st["date"]))
+        assert st["open_check_ins"] == [qdate]
+        return {"answers": [{"question_id": "q1", "answer": marker}]}
+
+    saved = (r.api, r.run_claude, r.investigate)
+    r.api, r.run_claude, r.investigate = api, claude, investigate
+    try:
+        with fake_collectors(scripts, claude_sessions="ok.py"):
+            r.poll_once(CFG, False)
+    finally:
+        r.api, r.run_claude, r.investigate = saved
+    assert ("summarizing", qdate) in seen and ("answering", qdate) in seen, seen
+    st = r.read_status()
+    assert st["phase"] == "idle" and st["date"] is None and st["last_poll_ended"] and st["last_poll_started"]
+    assert st["open_check_ins"] == [] and list(st["answered"]) == [qdate]       # answered: no longer open
+    assert set(st) <= {"phase", "date", "since", "last_poll_started", "last_poll_ended",
+                       "open_check_ins", "last_error", "answered"}, set(st)
+    assert marker not in r.STATUS_FILE.read_text()                               # no summary or answer text
+    assert r.STATUS_FILE.stat().st_mode & 0o777 == 0o600
+    # a failing run records the class name only
+    r.api = lambda *a, **k: (_ for _ in ()).throw(urllib.error.URLError("secret-host-detail"))
+    try:
+        r.poll_once(CFG, False)
+    except urllib.error.URLError:
+        pass
+    finally:
+        r.api = saved[0]
+    st = r.read_status()
+    assert st["last_error"] == "URLError" and st["phase"] == "idle" and "secret-host" not in r.STATUS_FILE.read_text()
+
+
+def hold_lock(seconds):
+    """A helper process that holds .lock like a running poll; returns once it holds it."""
+    import subprocess
+    code = ("import fcntl,sys,time\nf=open(sys.argv[1],'w');fcntl.flock(f,fcntl.LOCK_EX);"
+            "print('held',flush=True);time.sleep(float(sys.argv[2]))")
+    p = subprocess.Popen([sys.executable, "-c", code, str(r.YOLK_HOME / ".lock"), str(seconds)],
+                         stdout=subprocess.PIPE, text=True)
+    assert p.stdout.readline().strip() == "held"
+    return p
+
+
+def check_status_and_wait():
+    clean_dirs()
+    r.STATUS_FILE.unlink(missing_ok=True)
+    pending = {"sets": []}
+    briefs = {"list": []}
+
+    def api(cfg, method, path, body=None, auth=True):
+        if path.startswith("/v1/questions/pending"):
+            return 200, {"question_sets": pending["sets"]}
+        if path.startswith("/v1/briefs"):
+            return 200, {"briefs": briefs["list"]}
+        return 204, None
+    real = r.api
+    r.api = api
+    old = (r.WAIT_POLL_S, r.WAIT_SYNC_S)
+    r.WAIT_POLL_S = r.WAIT_SYNC_S = 0.2
+    try:
+        # running reflects the lock, and asking never blocks (nor leaves the lock held)
+        t0 = time_mod.monotonic()
+        assert r.status_report(CFG)["running"] is False
+        helper = hold_lock(30)
+        try:
+            assert r.status_report(CFG)["running"] is True
+        finally:
+            helper.kill()
+            helper.wait()
+        assert r.status_report(CFG)["running"] is False and time_mod.monotonic() - t0 < 5
+        with open(r.YOLK_HOME / ".lock", "w") as f:  # the poller can still take the lock afterwards
+            import fcntl
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        # offline: the cached open check-ins
+        r.set_status(open_check_ins=["2026-10-01"])
+        r.api = lambda *a, **k: (_ for _ in ()).throw(urllib.error.URLError("down"))
+        assert r.status_report(CFG)["open_check_ins"] == ["2026-10-01"]
+        r.api = api
+        r.set_status(open_check_ins=[])
+        (r.DAYS_DIR / "2026-10-05.summary.json").write_text("{}")
+        (r.BRIEFS_DIR / "2026-10-04.json").write_text("{}")
+        s = r.status_report(CFG)
+        assert s["reports_ready"] == ["2026-10-05"] and s["briefs"] == ["2026-10-04"] and s["newest_brief"] == "2026-10-04"
+
+        # --wait returns once the lock is released
+        helper = hold_lock(1.5)
+        t0 = time_mod.monotonic()
+        s = r.status_wait(CFG, 30)
+        waited = time_mod.monotonic() - t0
+        helper.wait()
+        assert 1.0 < waited < 10 and s["running"] is False, waited
+
+        # --wait returns at the timeout when a check-in never gets its brief
+        pending["sets"] = [{"id": "qs_x", "date": "2026-10-07"}]
+        t0 = time_mod.monotonic()
+        s = r.status_wait(CFG, 1)
+        assert 0.9 < time_mod.monotonic() - t0 < 6 and s["open_check_ins"] == ["2026-10-07"]
+
+        # ...and returns early once the brief arrives
+        calls = {"n": 0}
+
+        def api_brief(cfg, method, path, body=None, auth=True):
+            if path.startswith("/v1/briefs"):
+                calls["n"] += 1
+                if calls["n"] >= 3:
+                    return 200, {"briefs": [{"date": "2026-10-07", "brief": {"v": 1}}]}
+            return api(cfg, method, path, body, auth)
+        r.api = api_brief
+        t0 = time_mod.monotonic()
+        s = r.status_wait(CFG, 30)
+        assert time_mod.monotonic() - t0 < 10 and "2026-10-07" in s["briefs"], s
+    finally:
+        r.api = real
+        r.WAIT_POLL_S, r.WAIT_SYNC_S = old
+    # status never heals the poller
+    seen = []
+    real_heal, r.heal_schedule = r.heal_schedule, lambda: seen.append(1)
+    real_cfg, r.load_config = r.load_config, lambda: CFG
+    real_report = r.status_report
+    r.status_report = lambda cfg: {"ok": True}
+    try:
+        sys.argv = ["employee_runner.py", "status"]
+        r.main()
+    finally:
+        r.heal_schedule, r.load_config, r.status_report = real_heal, real_cfg, real_report
+    assert not seen
+
+
 if __name__ == "__main__":
     real_stdout = sys.stdout
     try:
@@ -755,6 +904,8 @@ if __name__ == "__main__":
             check_heal_installs_missing_plist()
             check_install_script_plist()
             check_launcher()
+            check_status_phases(scripts_dir)
+            check_status_and_wait()
     finally:
         import shutil
         shutil.rmtree(HOME, ignore_errors=True)

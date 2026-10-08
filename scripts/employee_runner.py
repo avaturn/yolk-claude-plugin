@@ -10,6 +10,7 @@ coach briefs and sends a heartbeat.
 No manager logic and no API keys live on this side.
 
 Data (YOLK_HOME, default ~/.claude/yolk/):
+  status.json           progress of the poll (phase, date, check-in dates; no content)
   agent.json            server, device_token, employee_id, timezone, poll_interval_s (0600)
   profile.md            the profile the manager registered (from the claim)
   briefs/<date>.json    coach briefs        (reports/ holds older daily reports, no longer written)
@@ -24,9 +25,11 @@ Usage: employee_runner.py [poll] [--verbose]    one poll cycle (what launchd run
        employee_runner.py claim <invite code>   link this device (/yolk:setup)
        employee_runner.py summarize [--date D | --limit N]  build local summaries (missing days, or D)
        employee_runner.py sync                  fetch briefs + heartbeat
+       employee_runner.py status [--wait N]     what is happening now (JSON); --wait N waits up to N s for it to finish
        employee_runner.py leave                 revoke this device's token
 """
 import argparse
+import contextlib
 import fcntl
 import json
 import os
@@ -60,6 +63,7 @@ DEFAULT_SERVER = os.environ.get("YOLK_SERVER", "https://plugin.dev.yolk.coach").
 YOLK_HOME = Path(os.environ.get("YOLK_HOME", str(Path.home() / ".claude" / "yolk")))
 CONFIG_FILE = YOLK_HOME / "agent.json"
 PROFILE_FILE = YOLK_HOME / "profile.md"
+STATUS_FILE = YOLK_HOME / "status.json"  # progress of the poll: phases, dates, counts; never content
 BRIEFS_DIR = YOLK_HOME / "briefs"
 REPORTS_DIR = YOLK_HOME / "reports"
 OUTBOX_DIR = YOLK_HOME / "outbox"
@@ -77,6 +81,9 @@ CLAUDE_TIMEOUT_S = 1500
 SUMMARY_TIMEOUT_S = 600     # the summarizer only reads one JSON blob and answers
 COLLECTOR_TIMEOUT_S = 120
 SUMMARY_BACKFILL_DAYS = 7   # finished days from today-7 to yesterday are summarized
+WAIT_POLL_S = 5            # status --wait: check for a running poll this often
+WAIT_SYNC_S = 60           # ...and sync briefs this often while a check-in is open
+ANSWERED_KEEP_S = 6 * 3600  # a check-in answered this recently is still awaiting its brief
 BACKFILL_PER_POLL = 2       # after the answers; a question date's own summary is not limited
 CLAUDE_MODEL = "claude-opus-5-5"
 CLAUDE_EFFORT = "high"
@@ -137,6 +144,40 @@ def ensure_dirs():
     for d in (YOLK_HOME, BRIEFS_DIR, REPORTS_DIR, OUTBOX_DIR, AUDIT_DIR, DAYS_DIR):
         d.mkdir(parents=True, exist_ok=True)
     os.chmod(DAYS_DIR, 0o700)  # raw collector output: prompt previews, commands, page titles
+
+
+def now_iso():
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def read_status():
+    try:
+        d = json.loads(STATUS_FILE.read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def set_status(**fields):
+    """Merge `fields` into status.json (atomic, 0600). Only phases, dates and class names."""
+    write_private(STATUS_FILE, json.dumps({**read_status(), **fields}, indent=1) + "\n")
+
+
+def set_phase(phase, date=None):
+    set_status(phase=phase, date=date, since=now_iso())
+
+
+@contextlib.contextmanager
+def tracked_run():
+    """A poll or a summarize run: status.json says what it is doing, and `idle` when it ends."""
+    set_status(phase="collecting", date=None, since=now_iso(), last_poll_started=now_iso(), last_error=None)
+    try:
+        yield
+    except Exception as e:  # noqa: BLE001 — SystemExit is how summarize reports its own error
+        set_status(last_error=e.__class__.__name__)
+        raise
+    finally:
+        set_status(phase="idle", date=None, since=now_iso(), last_poll_ended=now_iso())
 
 
 def summary_today(cfg):
@@ -428,9 +469,11 @@ Summarize now, then output ONLY the summary JSON object."""
 def summarize_day(cfg, date, profile, verbose):
     """Collect, summarize (one tool-less Claude run), sanitize, and save locally. Nothing is sent."""
     tz = cfg["timezone"]
+    set_phase("collecting", date)
     raw = collect_day(date, tz)
     statuses = raw["sources"]
     if "ok" in statuses.values():
+        set_phase("summarizing", date)
         started = time.monotonic()
         try:
             result = run_claude(summary_prompt(date, profile, tz, raw), str(uuid.uuid4()), verbose,
@@ -509,6 +552,11 @@ def summarize_days(cfg, days, profile, verbose):
 
 
 def summarize_cli(cfg, date, limit, verbose):
+    with tracked_run():
+        _summarize_cli(cfg, date, limit, verbose)
+
+
+def _summarize_cli(cfg, date, limit, verbose):
     today = summary_today(cfg)
     if date:  # an explicit date is rebuilt even if a summary exists
         d = parse_date(date)
@@ -520,6 +568,7 @@ def summarize_cli(cfg, date, limit, verbose):
         days = missing_days(today)[:limit]  # newest first
     built, error = summarize_days(cfg, days, load_profile(), verbose)
     log(f"Done — {built} summary(ies) built.")
+    set_status(last_error=error)
     if error:
         raise SystemExit(error)
 
@@ -739,6 +788,11 @@ Investigate now, then output ONLY the answers JSON."""
 
 
 def poll_once(cfg, verbose):
+    with tracked_run():
+        return _poll(cfg, verbose)
+
+
+def _poll(cfg, verbose):
     flush_outbox(cfg)      # answers a crashed or offline run saved but never sent
     sync_briefs(cfg)       # cheap calls first: a 25-min investigation must not delay them
     heartbeat(cfg)
@@ -749,6 +803,7 @@ def poll_once(cfg, verbose):
     error, tried = None, set()
     _, body = api(cfg, "GET", "/v1/questions/pending")
     sets = (body or {}).get("question_sets", [])
+    set_status(open_check_ins=sorted({str(q.get("date")) for q in sets}))
     if not sets:
         log("No pending questions.")
     done = 0
@@ -762,6 +817,7 @@ def poll_once(cfg, verbose):
             tried.add(qdate)
             _, err = summarize_days(cfg, [qdate], profile, verbose)
             error = error or err
+        set_phase("answering", qdate)
         log(f"Investigating {qs.get('date')} round {qs.get('round', 1)} ({sid}) …")
         try:
             raw = investigate(qs, profile, cfg["timezone"], verbose)
@@ -786,12 +842,69 @@ def poll_once(cfg, verbose):
         log(f"Answered {sid}" + (f" (privacy gate redacted: {violations})" if violations else ""))
         flush_outbox(cfg)
         done += 1
+        answered = {d: t for d, t in (read_status().get("answered") or {}).items()
+                    if time.time() - t < ANSWERED_KEEP_S}
+        answered[qdate] = int(time.time())
+        set_status(answered=answered)
     # answers are out: only now fill the rest of the week, newest first
     _, err = summarize_days(cfg, [d for d in missing_days(today) if d not in tried][:BACKFILL_PER_POLL], profile, verbose)
     error = error or err
+    set_status(last_error=error, open_check_ins=[d for d in read_status().get("open_check_ins", [])
+                                                 if d not in (read_status().get("answered") or {})])
     if sets or error:
         heartbeat(cfg, "error" if error else "ok", error)
     return done
+
+
+def lock_held():
+    """True while a poll holds .lock. A non-blocking try that is released at once (closing the file)."""
+    with open(YOLK_HOME / ".lock", "a") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+    return False
+
+
+def status_report(cfg):
+    st = read_status()
+    try:
+        _, body = api(cfg, "GET", "/v1/questions/pending")
+        open_dates = sorted({str(q.get("date")) for q in (body or {}).get("question_sets", [])})
+    except (urllib.error.URLError, TimeoutError, ConnectionError):
+        open_dates = st.get("open_check_ins", [])  # offline: the last fetch
+    stems = lambda d, suffix: sorted((f.name[:-len(suffix)] for f in d.glob("*" + suffix)  # noqa: E731
+                                      if DATE_RE.fullmatch(f.name[:-len(suffix)])), reverse=True)
+    answered = {d: t for d, t in (st.get("answered") or {}).items() if time.time() - t < ANSWERED_KEEP_S}
+    return {"running": lock_held(), "phase": st.get("phase", "idle"), "date": st.get("date"),
+            "since": st.get("since"), "last_poll_ended": st.get("last_poll_ended"),
+            "last_error": st.get("last_error"),
+            "reports_ready": stems(DAYS_DIR, ".summary.json"),
+            "briefs": stems(BRIEFS_DIR, ".json"), "newest_brief": latest_brief(),
+            "open_check_ins": open_dates, "answered_recently": sorted(answered)}
+
+
+def status_wait(cfg, seconds):
+    """Wait until no poll is running, sync briefs, then, while a check-in is open or was just
+    answered, keep syncing every WAIT_SYNC_S until its brief arrives or `seconds` pass."""
+    deadline = time.monotonic() + seconds
+
+    def sync():
+        try:
+            sync_briefs(cfg)
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            pass
+    while lock_held() and time.monotonic() < deadline:
+        time.sleep(min(WAIT_POLL_S, max(0, deadline - time.monotonic())))
+    sync()
+    while time.monotonic() < deadline:
+        st = status_report(cfg)
+        awaiting = [d for d in set(st["open_check_ins"]) | set(st["answered_recently"]) if d not in st["briefs"]]
+        if not awaiting:
+            break
+        time.sleep(min(WAIT_SYNC_S, max(0, deadline - time.monotonic())))
+        sync()
+    return status_report(cfg)
 
 
 def leave(cfg):
@@ -806,17 +919,18 @@ def leave(cfg):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", nargs="?", default="poll",
-                    choices=("poll", "claim", "sync", "leave", "summarize"))
+                    choices=("poll", "claim", "sync", "leave", "summarize", "status"))
     ap.add_argument("code", nargs="?", help="invite code (claim only)")
     ap.add_argument("--date", help="YYYY-MM-DD (summarize only; default: every missing day)")
     ap.add_argument("--limit", type=int, default=SUMMARY_BACKFILL_DAYS,
                     help="summarize only: build at most N missing days, newest first")
+    ap.add_argument("--wait", type=int, default=0, help="status only: wait up to N seconds")
     ap.add_argument("--verbose", action="store_true")
     a = ap.parse_args()
     if a.date and a.action != "summarize":
         ap.error("--date only applies to summarize")
     ensure_dirs()
-    if a.action != "leave":
+    if a.action not in ("leave", "status"):  # status is read-only; a heal could unload a running poll
         heal_schedule()
     try:
         if a.action == "claim":
@@ -830,6 +944,8 @@ def main():
         elif a.action == "sync":
             sync_briefs(cfg)
             heartbeat(cfg)
+        elif a.action == "status":
+            print(json.dumps(status_wait(cfg, a.wait) if a.wait else status_report(cfg), indent=1))
         else:
             with open(YOLK_HOME / ".lock", "w") as lock:
                 try:
