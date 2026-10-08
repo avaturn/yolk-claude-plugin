@@ -108,7 +108,8 @@ path. Without it the summary simply notes that Screen Time was unreadable.
 **Updates.** launchd does not run the plugin copy directly: the poller's plist runs
 `~/.claude/yolk/bin/launcher.py`, a copy of `scripts/launcher.py` that never moves and hands over to the
 newest installed plugin version (Claude Code keeps each version in its own directory and deletes an
-old one 14 days after an update). So an update reaches the poller by itself on its next run. When
+old one 14 days after an update). So an update reaches the poller by itself on its next run. A `SessionStart` hook (`hooks/hooks.json`) runs `employee_runner.py heal` at the start of every Claude Code session, so an old install
+migrates with no command: it is silent unless it changed something, uses no network, and never fails a session. When
 `/yolk:setup` or `/yolk:brief` runs, the plugin also re-installs the plist if the launcher copy is
 outdated or the plist is an older version-pinned one, and installs a missing plist (only for a linked,
 installed plugin on the default `~/.claude/yolk`; never from a dev checkout or test home; `/yolk:leave`

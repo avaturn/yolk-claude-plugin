@@ -882,6 +882,88 @@ def check_status_and_wait():
     assert not seen
 
 
+def check_heal_action_and_hook():
+    clean_dirs()
+    hook = json.loads((r.PLUGIN_ROOT / "hooks" / "hooks.json").read_text())["hooks"]["SessionStart"][0]
+    cmd = hook["hooks"][0]
+    assert cmd["type"] == "command" and cmd["command"].endswith('employee_runner.py" heal || true') and cmd["timeout"] <= 30
+    assert "${CLAUDE_PLUGIN_ROOT}" in cmd["command"]
+
+    tmp = Path(tempfile.mkdtemp(prefix="yolk-heal-"))
+    saved = (r.LAUNCH_PLIST, r.install_schedule, r.PLUGIN_ROOT, r.INSTALLED_PLUGINS_DIR, r.DEFAULT_YOLK_HOME)
+    r.LAUNCH_PLIST = tmp / "com.yolk.agent.plist"
+    r.INSTALLED_PLUGINS_DIR = tmp / "plugins"
+    good_root = r.INSTALLED_PLUGINS_DIR / "cache" / "yolk"
+    r.PLUGIN_ROOT, r.DEFAULT_YOLK_HOME = good_root, r.YOLK_HOME
+    calls = []
+    ok = [True]
+    r.install_schedule = lambda: (calls.append(1), ok[0])[1]
+    launcher = r.YOLK_HOME / "bin" / "launcher.py"
+    launcher.parent.mkdir(exist_ok=True)
+    launcher.write_bytes((r.HERE / "launcher.py").read_bytes())
+    xpc = os.environ.pop("XPC_SERVICE_NAME", None)
+    network = []
+    real_api, r.api = r.api, lambda *a, **k: network.append(a) or (200, {})
+
+    def heal():
+        buf = io.StringIO()
+        sys.argv = ["employee_runner.py", "heal"]
+        with contextlib.redirect_stdout(buf):
+            r.main()                      # must return normally, whatever happens
+        return buf.getvalue().strip().splitlines()
+
+    def plist(*args):
+        r.LAUNCH_PLIST.write_bytes(plistlib.dumps({"ProgramArguments": list(args),
+                                                   "EnvironmentVariables": {"YOLK_HOME": str(r.YOLK_HOME)}}))
+    try:
+        r.CONFIG_FILE.unlink(missing_ok=True)
+        assert heal() == [] and not calls                                  # not linked: silent, nothing installed
+        r.CONFIG_FILE.write_text("{}")
+        plist("/usr/bin/python3", str(launcher))
+        assert heal() == [] and not calls                                  # nothing to change: silent
+        plist("/usr/bin/python3", "/old/cache/yolk/yolk/1.6.0/scripts/employee_runner.py")
+        out = heal()                                                       # old versioned plist: one line
+        assert len(calls) == 1 and len(out) == 1 and "launcher" in out[0], out
+        ok[0] = False
+        assert len(heal()) == 1                                            # a failing install: still one line, no exception
+        r.LAUNCH_PLIST.write_text("junk")
+        assert heal() == []                                                # unreadable plist: logged to the file only
+        assert "plist unreadable" in agent_log()
+        plist("/old/x/employee_runner.py")
+        r.PLUGIN_ROOT = saved[2]                                           # guards hold: non-installed copy
+        n = len(calls)
+        assert heal() == [] and len(calls) == n
+        r.PLUGIN_ROOT = good_root
+        os.environ["YOLK_HOME"], old_env = str(tmp / "else"), os.environ["YOLK_HOME"]
+        r.LAUNCH_PLIST.unlink()
+        assert heal() == [] and len(calls) == n                            # YOLK_HOME overridden: no install
+        os.environ["YOLK_HOME"] = old_env
+        r.install_schedule = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+        assert heal() == []                                                # an exception never escapes
+        assert not network                                                 # no network call at all
+    finally:
+        r.api = real_api
+        r.LAUNCH_PLIST, r.install_schedule, r.PLUGIN_ROOT, r.INSTALLED_PLUGINS_DIR, r.DEFAULT_YOLK_HOME = saved
+        r.CONFIG_FILE.unlink(missing_ok=True)
+        os.environ["YOLK_HOME"] = str(r.YOLK_HOME)
+        if xpc is not None:
+            os.environ["XPC_SERVICE_NAME"] = xpc
+
+
+def check_no_reports_dir():
+    shutil.rmtree(r.REPORTS_DIR, ignore_errors=True)
+    r.ensure_dirs()
+    assert not r.REPORTS_DIR.exists()                       # not created any more
+    r.REPORTS_DIR.mkdir()
+    r.ensure_dirs()
+    assert not r.REPORTS_DIR.exists()                       # an empty one from an older version goes
+    r.REPORTS_DIR.mkdir()
+    (r.REPORTS_DIR / "2026-10-04.md").write_text("old")
+    r.ensure_dirs()
+    assert (r.REPORTS_DIR / "2026-10-04.md").read_text() == "old"   # old reports are never deleted
+    shutil.rmtree(r.REPORTS_DIR)
+
+
 if __name__ == "__main__":
     real_stdout = sys.stdout
     try:
@@ -906,6 +988,8 @@ if __name__ == "__main__":
             check_launcher()
             check_status_phases(scripts_dir)
             check_status_and_wait()
+            check_heal_action_and_hook()
+            check_no_reports_dir()
     finally:
         import shutil
         shutil.rmtree(HOME, ignore_errors=True)

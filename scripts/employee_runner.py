@@ -25,6 +25,7 @@ Usage: employee_runner.py [poll] [--verbose]    one poll cycle (what launchd run
        employee_runner.py claim <invite code>   link this device (/yolk:setup)
        employee_runner.py summarize [--date D | --limit N]  build local summaries (missing days, or D)
        employee_runner.py sync                  fetch briefs + heartbeat
+       employee_runner.py heal                  re-point/install the poller if needed (SessionStart hook)
        employee_runner.py status [--wait N]     what is happening now (JSON); --wait N waits up to N s for it to finish
        employee_runner.py leave                 revoke this device's token
 """
@@ -109,9 +110,10 @@ class Unlinked(Exception):
     """The server answered 401: this Mac's device token is no longer valid."""
 
 
-def log(msg):
+def log(msg, echo=True):
     line = f"[yolk {datetime.now().strftime('%H:%M:%S')}] {msg}"
-    print(line, flush=True)
+    if echo:
+        print(line, flush=True)
     AUDIT_DIR.mkdir(parents=True, exist_ok=True)
     with open(AUDIT_DIR / "agent.log", "a") as f:
         f.write(line + "\n")
@@ -141,8 +143,10 @@ def parse_date(s):
 
 
 def ensure_dirs():
-    for d in (YOLK_HOME, BRIEFS_DIR, REPORTS_DIR, OUTBOX_DIR, AUDIT_DIR, DAYS_DIR):
+    for d in (YOLK_HOME, BRIEFS_DIR, OUTBOX_DIR, AUDIT_DIR, DAYS_DIR):
         d.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        REPORTS_DIR.rmdir()  # older versions made it; reports are gone. A non-empty one (old reports) stays
     os.chmod(DAYS_DIR, 0o700)  # raw collector output: prompt previews, commands, page titles
 
 
@@ -591,7 +595,7 @@ def install_schedule():
     """Re-run install_schedule.sh; True if it succeeded."""
     try:
         return subprocess.run(["bash", str(INSTALL_SCRIPT)], capture_output=True, text=True,
-                              timeout=60).returncode == 0
+                              timeout=25).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -617,7 +621,7 @@ def heal_schedule():
     try:
         plist = plistlib.loads(LAUNCH_PLIST.read_bytes())
     except Exception:  # noqa: BLE001
-        log("background poller plist unreadable: run install_schedule.sh (or /yolk:setup)")
+        log("background poller plist unreadable: run install_schedule.sh (or /yolk:setup)", echo=False)  # a session hook must stay silent
         return
     if (plist.get("EnvironmentVariables") or {}).get("YOLK_HOME") != str(YOLK_HOME):
         return
@@ -919,7 +923,7 @@ def leave(cfg):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", nargs="?", default="poll",
-                    choices=("poll", "claim", "sync", "leave", "summarize", "status"))
+                    choices=("poll", "claim", "sync", "leave", "summarize", "status", "heal"))
     ap.add_argument("code", nargs="?", help="invite code (claim only)")
     ap.add_argument("--date", help="YYYY-MM-DD (summarize only; default: every missing day)")
     ap.add_argument("--limit", type=int, default=SUMMARY_BACKFILL_DAYS,
@@ -929,6 +933,10 @@ def main():
     a = ap.parse_args()
     if a.date and a.action != "summarize":
         ap.error("--date only applies to summarize")
+    if a.action == "heal":  # SessionStart hook: no network, no dirs, no poll; silent unless it changed something
+        with contextlib.suppress(Exception):
+            heal_schedule()
+        return
     ensure_dirs()
     if a.action not in ("leave", "status"):  # status is read-only; a heal could unload a running poll
         heal_schedule()
