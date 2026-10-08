@@ -1,33 +1,27 @@
 # Yolk — Employee Agent
 
-The employee-side Claude Code plugin for your org's Yolk daily check-in. This agent
-reads your local work evidence, builds a **sanitized, business-level summary of each
-past workday** (what you did, where, how) and sends it to your manager's AI, so your
-report starts right away. If the summary leaves gaps, the manager's AI posts a few
-questions and this agent investigates **locally** and sends back **sanitized answers only**.
+The employee-side Claude Code plugin for your org's Yolk daily check-in. Your
+manager's AI posts a few questions about how you actually worked; this agent
+investigates **locally** and sends back **sanitized, business-level answers only**.
+Raw activity data and the daily summaries it builds for itself are **never sent to Yolk or your manager**; they are processed by Claude under your own account.
 
-## What stays on your machine — always
+## What is never sent — always
 
 - Raw code, diffs, prompts, shell commands, chat logs, email/message bodies, URLs, credentials.
-- The raw collector output (prompt previews, commands, every page title and domain): it is
-  written to `~/.claude/yolk/days/<date>.json`, readable by your user only, never sent, and deleted after 14 days.
-- Personal activity detail: it leaves only as a total ("35 personal minutes"), never what it was.
+- The raw collector output (prompt previews, commands, every page title and domain): written
+  to `~/.claude/yolk/days/<date>.json`, readable by your user only, never sent to Yolk, deleted after 14 days. (Claude reads it under your own account to write the summary.)
+- **The daily summaries**: for each finished day of the last 7 the agent writes a private
+  summary (what / where / how) to `~/.claude/yolk/days/<date>.summary.json` and answers from it. Never sent to Yolk or your manager.
 - Everything the agent reads: Claude Code sessions, Screen Time, git, and the browser history of every Chromium-family browser it finds (Chrome, Arc, Brave, Edge, Chromium and Vivaldi).
 
-What leaves, over HTTPS:
-
-- **A daily summary** of each past workday: an overview, active and personal minutes, time
-  blocks with *what / where / how* (like *"10:30–11:26 daily sync (Fireflies-recorded)"*,
-  *"afternoon on the Coram pitch deck"*), the work items of the day, and which sources could be read.
-  A new day's summary is built and sent on the first poll after the day ends — no waiting for questions.
-- **Answers** to the manager's follow-up questions about gaps.
-
-A deterministic sanitizer strips code blocks and secret patterns on top of the agent's
-rules. Every payload sent is kept in `~/.claude/yolk/audit/` (`summary-<date>.sent.json`).
+What leaves, over HTTPS: only **sanitized answers to the manager AI's questions**, at business level, like
+*"10:30–11:26 daily sync (Fireflies-recorded); afternoon spent on the Coram pitch deck."* Personal
+activity is reported only in aggregate. A deterministic sanitizer strips code blocks and secret
+patterns on top of the agent's rules. Every answer sent is kept in `~/.claude/yolk/audit/`.
 
 This plugin contains **no manager logic** and needs **no API key** — summaries and
-investigations run on your own Claude subscription. Your manager's daily report about you and your
-coach brief come back to `~/.claude/yolk/` — read them with `/yolk:report` and `/yolk:brief`.
+investigations run on your own Claude subscription (Claude Opus 5.5, high effort). Your manager sees your sanitized answers and a team digest you never see. You see your own daily activity
+report (the local summary, `/yolk:report`) and your coach brief (`/yolk:brief`, from your answers).
 
 ## Install
 
@@ -73,43 +67,44 @@ background poller runs it). Check with `claude --version`.
 
 1. `/yolk:leave` revokes this Mac's token and stops the poller.
 2. `claude plugin uninstall yolk@yolk`, then `claude plugin marketplace remove yolk`.
-3. Delete `~/.claude/yolk/` if you do not need your briefs, reports and audit trail.
+3. Delete `~/.claude/yolk/` if you do not need your briefs, old reports, local summaries and audit trail.
 
 | Command | What it does |
 |---|---|
 | `/yolk:setup <code>` | Consent, link this Mac with the invite, install the background poller |
-| `/yolk:answer` | Send missing daily summaries and answer pending questions now (otherwise the poller runs every 20 min) |
+| `/yolk:answer` | Answer pending questions now, then build missing local summaries (otherwise the poller runs every 20 min) |
 | `/yolk:brief [date]` | Your coach brief |
-| `/yolk:report [date]` | The report your manager received about you |
+| `/yolk:report [date]` | Your own daily activity report (the local summary of a day) |
 | `/yolk:leave` | Revoke this Mac's token and stop the poller |
 
 ## How it works
 
 ```
-this Mac: run the 4 collectors → days/<date>.json (raw, stays here)
-          → one local claude -p run (no tools) → sanitize → POST /v1/summaries/<date>
-Yolk server ◀──sanitized daily summary──┘      (the server starts your report now)
-Yolk server ──question sets (gaps only)──▶ this Mac: investigate locally (claude -p)
-                                              starting from that summary
-                                              → sanitize → POST answers
-Yolk server ──report + brief──▶ ~/.claude/yolk/reports, briefs
+Yolk server ──question sets──▶ this Mac: build that day's local summary if missing
+                                  (4 collectors → days/<date>.json → claude -p, no tools → days/<date>.summary.json)
+                                  → investigate locally (claude -p), starting from the summary
+                                  → sanitize → POST answers
+Yolk server ◀──sanitized answers──┘
+Yolk server ──coach brief──▶ ~/.claude/yolk/briefs
 ```
 
-Every 20 minutes the poller sends what is still unsent, then builds a summary for each
-past day that has none (from the day before you linked, at most the last 7 days), then
-answers questions. A day the server refuses (HTTP 422) is not retried, and a day whose summary fails to build 3 times is given up on (`audit/summary-<date>.failed.json`); the manager's AI then asks questions instead. A day is summarized only after it has ended in both your timezone and the machine's. `summarize`
-(`python3 scripts/employee_runner.py summarize [--date YYYY-MM-DD]`) does the summary step on demand.
+Every 20 minutes the poller sends unsent answers, fetches briefs, then for each question set builds that
+day's summary if missing and answers it. Only after the answers are out does it fill in the local summary
+of other finished days (up to 2 per poll) from 7 days ago to yesterday. A day whose summary fails to build 3 times is
+given up on (`audit/summary-<date>.failed.json`, local). A day is summarized only after it has ended in
+both your timezone and the machine's. `python3 scripts/employee_runner.py summarize [--date YYYY-MM-DD | --limit N]`
+builds summaries on demand.
 
 Device API v1 over HTTPS, one device token per person (stored in
-`~/.claude/yolk/agent.json`, mode 600). All timestamps in summaries and answers are
+`~/.claude/yolk/agent.json`, mode 600). All timestamps in answers are
 normalized to **your** timezone (from your registration), wherever the data came from.
 
 **Full Disk Access.** Screen Time is readable only by programs with Full Disk Access. The
 background poller runs as the `python3` binary named in its launchd plist (not your
 terminal), so grant it to that binary — `/yolk:setup` and `install_schedule.sh` print its
-path. Without it the summary simply marks Screen Time as unreadable.
+path. Without it the summary simply notes that Screen Time was unreadable.
 
 **Updates.** The poller's launchd plist points at the installed plugin copy. After an update, the
-next time any `/yolk` command runs the plugin re-points the plist at the new copy (only if you
-installed the poller; it is never installed behind your back). The two prompts the agent gives
+next time the runner runs (`/yolk:setup`, `/yolk:answer` or `/yolk:brief`; `/yolk:report` and `/yolk:leave` do not run it) the plugin re-points the plist at the new copy (only for the real installed plugin and
+your real `~/.claude/yolk`; never from a dev checkout or test home, and never if you did not install the poller). The two prompts the agent gives
 Claude live in `charters/`, not `agents/`, so they do not show up as subagents in your sessions.

@@ -10,6 +10,7 @@ import os
 import plistlib
 import sys
 import tempfile
+import time as time_mod
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
@@ -26,7 +27,7 @@ TODAY = date(2026, 10, 8)
 
 
 def clean_dirs():
-    for d in (r.SUMMARY_OUTBOX_DIR, r.OUTBOX_DIR, r.AUDIT_DIR, r.DAYS_DIR, r.BRIEFS_DIR):
+    for d in (r.OUTBOX_DIR, r.AUDIT_DIR, r.DAYS_DIR, r.BRIEFS_DIR):
         for f in d.glob("*"):
             if f.is_file():
                 f.unlink()
@@ -92,20 +93,16 @@ def check_contract():
 
 def check_missing_days():
     clean_dirs()
-    f = lambda cfg: r.missing_days(cfg, TODAY)  # noqa: E731
-    assert f({}) == ["2026-10-07"]                                   # no linked_on: yesterday only
-    assert f({"linked_on": "garbage"}) == ["2026-10-07"]
-    assert f({"linked_on": "2026-10-08"}) == ["2026-10-07"]          # linked today: yesterday goes out now
-    assert f({"linked_on": "2026-10-05"}) == ["2026-10-07", "2026-10-06", "2026-10-05", "2026-10-04"]
-    assert f({"linked_on": "2026-09-01"}) == [f"2026-10-0{n}" for n in range(7, 0, -1)]  # capped at 7 days
-    assert f({"linked_on": "2026-10-20"}) == []
-    cfg = {"linked_on": "2026-10-05"}
-    (r.SUMMARY_OUTBOX_DIR / "2026-10-07.json").write_text("{}")      # queued
-    (r.AUDIT_DIR / "summary-2026-10-06.sent.json").write_text("{}")
-    (r.AUDIT_DIR / "summary-2026-10-05.rejected.json").write_text("{}")
-    assert f(cfg) == ["2026-10-04"]
-    (r.AUDIT_DIR / "2026-10-04.sent.json").write_text("{}")          # an ANSWER file is not a summary
-    assert f(cfg) == ["2026-10-04"]
+    last7 = [f"2026-10-0{n}" for n in range(7, 0, -1)]
+    assert r.missing_days(TODAY) == last7                             # nothing local yet: the last 7, newest first
+    (r.DAYS_DIR / "2026-10-07.summary.json").write_text("{}")          # a local summary: done
+    (r.AUDIT_DIR / "summary-2026-10-06.failed.json").write_text("{}")  # given up: done
+    (r.DAYS_DIR / "2026-10-05.json").write_text("{}")                  # raw data alone is not a summary
+    (r.AUDIT_DIR / "2026-10-04.sent.json").write_text("{}")            # an ANSWER file is not a summary
+    assert r.missing_days(TODAY) == ["2026-10-05", "2026-10-04", "2026-10-03", "2026-10-02", "2026-10-01"]
+    assert r.in_window("2026-10-01", TODAY) and r.in_window("2026-10-07", TODAY)
+    assert not r.in_window("2026-09-30", TODAY) and not r.in_window("2026-10-08", TODAY)  # too old / not finished
+    assert not r.in_window("junk", TODAY) and not r.in_window("None", TODAY)
     assert r.employee_now({"timezone": "Asia/Jerusalem"}).utcoffset() is not None
     assert r.employee_now({"timezone": "No/Such_Zone"}).utcoffset() is not None  # falls back
 
@@ -120,11 +117,31 @@ def check_claim():
     finally:
         r.api = real
     cfg = json.loads(r.CONFIG_FILE.read_text())
-    assert cfg["linked_on"] == r.employee_now(cfg).date().isoformat(), cfg
-    assert r.CONFIG_FILE.stat().st_mode & 0o777 == 0o600
-    today = r.employee_now(cfg).date()
-    assert r.missing_days(cfg, today) == [(today - timedelta(days=1)).isoformat()]  # yesterday, right now
+    assert "linked_on" not in cfg and r.CONFIG_FILE.stat().st_mode & 0o777 == 0o600
     r.CONFIG_FILE.unlink()
+
+
+def check_sync_briefs_and_heartbeat_glob():
+    clean_dirs()
+    real, r.api = r.api, lambda cfg, m, path, body=None, auth=True: (200, {"briefs": [
+        {"date": "2026-10-07", "brief": {"v": 1}, "report_markdown": "# old report"}]})
+    try:
+        r.sync_briefs(CFG)
+    finally:
+        r.api = real
+    assert json.loads((r.BRIEFS_DIR / "2026-10-07.json").read_text()) == {"v": 1}
+    assert not (r.REPORTS_DIR / "2026-10-07.md").exists()          # reports are no longer written
+    # 1.4.0 left summary-*.sent.json behind: never "last answered"
+    (r.AUDIT_DIR / "qs_1.sent.json").write_text("{}")
+    os.utime(r.AUDIT_DIR / "qs_1.sent.json", (1_700_000_000, 1_700_000_000))
+    (r.AUDIT_DIR / "summary-2026-10-06.sent.json").write_text("{}")
+    sent = []
+    r.api = lambda cfg, m, path, body=None, auth=True: (sent.append(body), (204, None))[1]
+    try:
+        r.heartbeat(CFG)
+    finally:
+        r.api = real
+    assert sent[0]["last_answered_at"].startswith("2023-11-1"), sent[0]
 
 
 def check_latest_brief():
@@ -159,36 +176,17 @@ def check_collectors():
     return scripts
 
 
-def check_flush(scripts):
+def check_heartbeat_and_answers_flush():
     clean_dirs()
     posts = []
-    answers = {"2026-10-01": 201, "2026-10-02": 409, "2026-10-03": 422, "2026-10-04": 500, "2026-10-05": 404}
-
-    def fake_api(cfg, method, path, body=None, auth=True):
-        posts.append(path)
-        return answers.get(path.rsplit("/", 1)[-1], 201), None
-
-    real, r.api = r.api, fake_api
+    real, r.api = r.api, lambda cfg, m, path, body=None, auth=True: (posts.append(path), (201, None))[1]
     try:
-        for d in answers:
-            (r.SUMMARY_OUTBOX_DIR / f"{d}.json").write_text("{}")
         (r.OUTBOX_DIR / "qs_1.json").write_text("{}")
-        r.flush_outbox(CFG)  # must leave the summaries alone
-        assert posts == ["/v1/questions/qs_1/answers"], posts
-        assert len(list(r.SUMMARY_OUTBOX_DIR.glob("*.json"))) == 5
-        r.flush_summaries(CFG)
+        r.flush_outbox(CFG)
     finally:
         r.api = real
-    assert (r.AUDIT_DIR / "summary-2026-10-01.sent.json").exists()
-    assert (r.AUDIT_DIR / "summary-2026-10-02.sent.json").exists()          # 409 is success
-    assert (r.AUDIT_DIR / "summary-2026-10-03.rejected.json").exists()      # 422: never resent
-    assert sorted(p.stem for p in r.SUMMARY_OUTBOX_DIR.glob("*.json")) == ["2026-10-04", "2026-10-05"]  # retried
-    assert "/v1/summaries/2026-10-01" in posts
-
-    # a summary sent later than an answer must not become "last answered"
-    answer = r.AUDIT_DIR / "qs_1.sent.json"
-    answer.write_text("{}")
-    os.utime(answer, (1_700_000_000, 1_700_000_000))
+    assert posts == ["/v1/questions/qs_1/answers"] and (r.AUDIT_DIR / "qs_1.sent.json").exists()
+    os.utime(r.AUDIT_DIR / "qs_1.sent.json", (1_700_000_000, 1_700_000_000))
     sent = []
     r.api = lambda cfg, m, path, body=None, auth=True: (sent.append(body), (204, None))[1]
     try:
@@ -196,6 +194,7 @@ def check_flush(scripts):
     finally:
         r.api = real
     assert sent[0]["last_answered_at"].startswith("2023-11-1"), sent[0]
+    assert not hasattr(r, "flush_summaries") and not hasattr(r, "SUMMARY_OUTBOX_DIR")
 
 
 def check_summarize_and_investigate(scripts):
@@ -215,13 +214,13 @@ def check_summarize_and_investigate(scripts):
     finally:
         r.COLLECTORS_DIR = old_dir
     assert prompts[0][1].get("toolless") is True and "role: tester" in prompts[0][0]
-    env = json.loads((r.SUMMARY_OUTBOX_DIR / "2026-10-07.json").read_text())
+    env = json.loads((r.DAYS_DIR / "2026-10-07.summary.json").read_text())
     assert set(env) == {"timezone", "generated_at", "agent_version", "privacy_redactions", "sources", "summary"}
     assert env["sources"] == {"claude_sessions": "ok", "screen_time": "error", "git": "empty", "browser": "error"}
     assert env["agent_version"] == r.VERSION and env["timezone"] == "Asia/Jerusalem"
     assert "debug" not in env["summary"] and env["summary"]["blocks"][0]["what"] == marker
     assert env["generated_at"].endswith(("+03:00", "+02:00"))
-    assert (r.DAYS_DIR / "2026-10-07.summary.json").read_text() == (r.SUMMARY_OUTBOX_DIR / "2026-10-07.json").read_text()
+    assert not (r.OUTBOX_DIR / "summaries").exists()                                       # nothing queued for sending
     for name in ("2026-10-07.json", "2026-10-07.summary.json"):
         assert (r.DAYS_DIR / name).stat().st_mode & 0o777 == 0o600, name
     raw = json.loads((r.DAYS_DIR / "2026-10-07.json").read_text())
@@ -239,18 +238,18 @@ def check_summarize_and_investigate(scripts):
         r.COLLECTORS_DIR = old_dir
         r.COLLECTORS.update(old_map)
     assert len(prompts) == n
-    env = json.loads((r.SUMMARY_OUTBOX_DIR / "2026-10-06.json").read_text())
+    env = json.loads((r.DAYS_DIR / "2026-10-06.summary.json").read_text())
     assert env["summary"]["blocks"] == [] and set(env["sources"].values()) == {"empty"}
 
     # investigate(): the day's summary goes into the prompt, once it exists, and only for a real date
     prompts.clear()
     r.run_claude = lambda prompt, sid, verbose, what, **kw: (prompts.append(prompt), '{"answers": []}')[1]
     r.investigate({"date": "2026-10-07", "questions": []}, "role", "Asia/Jerusalem", False)
-    assert marker in prompts[0] and "already sent" in prompts[0]
+    assert marker in prompts[0] and "built on this device" in prompts[0]
     r.investigate({"date": "2026-10-03", "questions": []}, "role", "Asia/Jerusalem", False)
-    assert "already sent" not in prompts[1]
+    assert "built on this device" not in prompts[1]
     r.investigate({"date": "../../etc/passwd", "questions": []}, "role", "Asia/Jerusalem", False)
-    assert "already sent" not in prompts[2]
+    assert "built on this device" not in prompts[2]
 
 
 @contextlib.contextmanager
@@ -291,39 +290,20 @@ def check_atomic_and_corrupt_outbox():
     try:
         (r.OUTBOX_DIR / "qs_bad.json").write_text("{not json")
         (r.OUTBOX_DIR / "qs_ok.json").write_text("{}")
-        (r.SUMMARY_OUTBOX_DIR / "2026-10-02.json").write_bytes(b"\xff\xfe\x00")  # not UTF-8
-        (r.SUMMARY_OUTBOX_DIR / "2026-10-03.json").write_text("[1]")               # not an object
-        (r.SUMMARY_OUTBOX_DIR / "2026-10-04.json").write_text("{}")
+        (r.OUTBOX_DIR / "qs_utf8.json").write_bytes(b"\xff\xfe\x00")  # not UTF-8
+        (r.OUTBOX_DIR / "qs_list.json").write_text("[1]")               # not an object
         r.flush_outbox(CFG)
-        r.flush_summaries(CFG)
     finally:
         r.api = real
-    assert posts == ["/v1/questions/qs_ok/answers", "/v1/summaries/2026-10-04"], posts
-    for name in ("qs_bad", "summary-2026-10-02", "summary-2026-10-03"):
+    assert posts == ["/v1/questions/qs_ok/answers"], posts
+    for name in ("qs_bad", "qs_utf8", "qs_list"):
         assert (r.AUDIT_DIR / f"{name}.rejected.json").exists(), name
-    assert (r.AUDIT_DIR / "qs_ok.sent.json").exists() and (r.AUDIT_DIR / "summary-2026-10-04.sent.json").exists()
-    assert not list(r.OUTBOX_DIR.glob("*.json")) and not list(r.SUMMARY_OUTBOX_DIR.glob("*.json"))
+    assert (r.AUDIT_DIR / "qs_ok.sent.json").exists() and not list(r.OUTBOX_DIR.glob("*.json"))
     assert "unreadable" in agent_log()
 
     # an outbox body written by the poller is atomic and private too
     r.write_private(r.OUTBOX_DIR / "qs_1.json", "{}")
     assert (r.OUTBOX_DIR / "qs_1.json").stat().st_mode & 0o777 == 0o600
-
-
-def check_409_keeps_first_copy():
-    clean_dirs()
-    sent = r.AUDIT_DIR / "summary-2026-10-01.sent.json"
-    sent.write_text("FIRST")
-    (r.SUMMARY_OUTBOX_DIR / "2026-10-01.json").write_text('{"second": 1}')
-    (r.SUMMARY_OUTBOX_DIR / "2026-10-02.json").write_text('{"only": 1}')
-    real, r.api = r.api, lambda cfg, m, path, body=None, auth=True: (409, None)
-    try:
-        r.flush_summaries(CFG)
-    finally:
-        r.api = real
-    assert sent.read_text() == "FIRST"                                                  # kept
-    assert json.loads((r.AUDIT_DIR / "summary-2026-10-02.sent.json").read_text()) == {"only": 1}  # written: none before
-    assert not list(r.SUMMARY_OUTBOX_DIR.glob("*.json"))
 
 
 def check_attempt_cap(scripts):
@@ -349,18 +329,40 @@ def check_attempt_cap(scripts):
             failed = json.loads((r.AUDIT_DIR / f"summary-{d}.failed.json").read_text())
             assert set(failed) == {"date", "attempts", "last_error", "failed_at"} and failed["attempts"] == 3
             assert failed["last_error"] == "BadReply" and leak not in json.dumps(failed)
-        assert leak not in agent_log() and not list(r.SUMMARY_OUTBOX_DIR.glob("*.json"))
-        assert r.missing_days({"linked_on": "2026-10-06"}, TODAY) == ["2026-10-05"]   # 06 and 07 are done
+        assert leak not in agent_log() and not list(r.DAYS_DIR.glob("*.summary.json"))
+        assert r.missing_days(TODAY) == [f"2026-10-0{n}" for n in (5, 4, 3, 2, 1)]    # 06 and 07 are given up
 
-        # claude ran and failed (exit, timeout): counted, and the poll stops at once
+        # claude exited non-zero (logged out, usage limit, network): NOT counted; the day cools down
+        # for 6 h and the OLDER days are still tried (one bad day must not block the week)
+        clean_dirs()
+        calls.clear()
+        bad_day = days[0]
+
+        def behaviour():
+            if len(calls) % 2 == 1:   # the 1st call of each poll is the newest day
+                raise r.ClaudeFailed("rc=1")
+            return json.dumps({"overview": "fine"})
+        built, error = r.summarize_days(CFG, days, "role", False)
+        assert (built, error, len(calls)) == (1, "summary failed (ClaudeFailed)", 2), (built, error, calls)
+        assert not list(r.DAYS_DIR.glob("*.attempts")) and (r.DAYS_DIR / f"{bad_day}.cooldown").exists()
+        assert (r.DAYS_DIR / f"{days[1]}.summary.json").exists()
+        # cooling: not offered again within 6 h, offered again after
+        assert bad_day not in r.missing_days(TODAY) and days[1] not in r.missing_days(TODAY)
+        os.utime(r.DAYS_DIR / f"{bad_day}.cooldown", (time_mod.time() - 7 * 3600,) * 2)
+        assert bad_day in r.missing_days(TODAY)
+        os.utime(r.DAYS_DIR / f"{bad_day}.cooldown")
+        assert not r.cooling("2026-10-01") and r.cooling(bad_day)
+
+        # a timeout: counted, and the poll stops at once
         clean_dirs()
         calls.clear()
 
         def behaviour():
-            raise r.ClaudeFailed("rc=1")
+            raise r.ClaudeTimeout("timed out")
         built, error = r.summarize_days(CFG, days, "role", False)
-        assert (built, error, len(calls)) == (0, "summary failed (ClaudeFailed)", 1), (built, error, calls)
+        assert (built, error, len(calls)) == (0, "summary failed (ClaudeTimeout)", 1), (built, error, calls)
         assert (r.DAYS_DIR / "2026-10-07.attempts").read_text() == "1" and not (r.DAYS_DIR / "2026-10-06.attempts").exists()
+        assert "took" in agent_log() and " s." in agent_log()    # run duration is logged (seconds only)
 
         # claude not installed: nothing counted, the poll stops
         clean_dirs()
@@ -375,11 +377,7 @@ def check_attempt_cap(scripts):
         # success clears the count
         (r.DAYS_DIR / "2026-10-07.attempts").write_text("2")
         behaviour = lambda: json.dumps({"overview": "fine"})  # noqa: E731
-        real_api, r.api = r.api, lambda cfg, m, path, body=None, auth=True: (201, None)
-        try:
-            built, error = r.summarize_days(CFG, ["2026-10-07"], "role", False)
-        finally:
-            r.api = real_api
+        built, error = r.summarize_days(CFG, ["2026-10-07"], "role", False)
         assert (built, error) == (1, None) and not (r.DAYS_DIR / "2026-10-07.attempts").exists()
 
     # the real helper: a missing claude is ClaudeUnavailable, not a crash
@@ -416,6 +414,8 @@ def check_claude_flags():
     assert "--dangerously-skip-permissions" in full and "PROMPT" in full and "--tools" not in full
     assert "--dangerously-skip-permissions" not in bare and "PROMPT" not in bare            # stdin, not argv
     assert bare[bare.index("--tools") + 1] == "" and "--strict-mcp-config" in bare
+    for argv in (full, bare):  # both runs: Opus 5.5, high effort
+        assert argv[argv.index("--model") + 1] == "claude-opus-5-5" and argv[argv.index("--effort") + 1] == "high"
 
 
 def check_day_boundary():
@@ -429,7 +429,7 @@ def check_day_boundary():
         assert r.summary_today(CFG) == machine_today - timedelta(days=1)  # machine's day is ahead
         r.employee_now = lambda cfg: datetime.combine(machine_today + timedelta(days=1), time(1, 0))
         try:  # "today" on the machine has not ended: refused, as the server would 422 it
-            r.summarize_cli(CFG, machine_today.isoformat(), False)
+            r.summarize_cli(CFG, machine_today.isoformat(), 7, False)
             raise AssertionError("expected SystemExit")
         except SystemExit as e:
             assert "--date" in str(e)
@@ -441,7 +441,7 @@ def check_prune():
     clean_dirs()
     today = r.summary_today(CFG)
     old, edge, new = ((today - timedelta(days=n)).isoformat() for n in (15, 14, 1))
-    names = [f"{old}.json", f"{old}.summary.json", f"{old}.attempts", f"{edge}.json", f"{new}.json",
+    names = [f"{old}.json", f"{old}.summary.json", f"{old}.attempts", f"{old}.cooldown", f"{edge}.json", f"{new}.json",
              "notes.txt", "short"]
     for n in names:
         (r.DAYS_DIR / n).write_text("x")
@@ -459,8 +459,14 @@ def check_heal_schedule():
     result = [True]
     script = r.HERE / "employee_runner.py"
 
-    def plist(*args):
-        r.LAUNCH_PLIST.write_bytes(plistlib.dumps({"Label": "com.yolk.agent", "ProgramArguments": list(args)}))
+    real_root, real_plugins = r.PLUGIN_ROOT, r.INSTALLED_PLUGINS_DIR
+    r.INSTALLED_PLUGINS_DIR = tmp / "plugins"           # pretend this copy is the installed plugin
+    r.PLUGIN_ROOT = r.INSTALLED_PLUGINS_DIR / "cache" / "yolk"
+
+    def plist(*args, home=None):
+        r.LAUNCH_PLIST.write_bytes(plistlib.dumps({
+            "Label": "com.yolk.agent", "ProgramArguments": list(args),
+            "EnvironmentVariables": {"YOLK_HOME": home or str(r.YOLK_HOME)}}))
 
     xpc = os.environ.pop("XPC_SERVICE_NAME", None)
     try:
@@ -490,7 +496,19 @@ def check_heal_schedule():
         assert len(calls) == 1
         added = agent_log()[len(before):].strip().splitlines()
         assert len(added) == 1 and "re-pointed" in added[0], added          # exactly one log line
-        r.LAUNCH_PLIST.write_text("not a plist")                           # unreadable: stale
+        # a dev/test run must never re-point the real poller (install_schedule.sh would bake in ITS env)
+        plist("/old/x/employee_runner.py", home="/some/other/yolk-home")   # the plist belongs to another YOLK_HOME
+        r.heal_schedule()
+        assert len(calls) == 1
+        plist("/old/x/employee_runner.py")
+        r.PLUGIN_ROOT = real_root                                          # this copy is not under ~/.claude/plugins
+        r.heal_schedule()
+        assert len(calls) == 1
+        r.PLUGIN_ROOT = r.INSTALLED_PLUGINS_DIR / "cache" / "yolk"
+        r.LAUNCH_PLIST.write_text("not a plist")                           # unreadable: cannot prove it is ours
+        r.heal_schedule()
+        assert len(calls) == 1 and "plist unreadable: run install_schedule.sh" in agent_log()
+        plist("/old/x/employee_runner.py")
         r.heal_schedule()
         assert len(calls) == 2
         result[0] = False                                                  # a failing install is logged, not raised
@@ -512,9 +530,59 @@ def check_heal_schedule():
             r.sync_briefs, r.heartbeat, r.leave = real_sync, real_hb, real_leave
     finally:
         r.LAUNCH_PLIST, r.install_schedule = real_plist, real_install
+        r.PLUGIN_ROOT, r.INSTALLED_PLUGINS_DIR = real_root, real_plugins
         os.environ.pop("XPC_SERVICE_NAME", None)
         if xpc is not None:
             os.environ["XPC_SERVICE_NAME"] = xpc
+
+
+def check_poll_order(scripts):
+    """Answers come first; a question date's summary is built right before its investigation;
+    the backfill of the other days comes after the answers; /v1/summaries is never called."""
+    clean_dirs()
+    today = r.summary_today(CFG)
+    day = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731
+    events, paths = [], []
+
+    def api(cfg, method, path, body=None, auth=True):
+        paths.append(path)
+        if path.startswith("/v1/questions/pending"):
+            return 200, {"question_sets": [{"id": "qs_a", "date": day(3), "round": 1, "questions": []},
+                                           {"id": "qs_b", "date": day(400), "round": 1, "questions": []}]}
+        if path.startswith("/v1/briefs"):
+            return 200, {"briefs": []}
+        events.append(("post", path))
+        return (201 if "answers" in path else 204), None
+
+    def summary_day(cfg, date, profile, verbose):
+        events.append(("summary", date))
+        write = r.DAYS_DIR / f"{date}.summary.json"
+        write.write_text("{}")
+
+    def investigate(qs, profile, tz, verbose):
+        events.append(("investigate", qs["date"]))
+        return {"answers": []}
+
+    saved = (r.api, r.summarize_day, r.investigate)
+    r.api, r.summarize_day, r.investigate = api, summary_day, investigate
+    (r.OUTBOX_DIR / "qs_old.json").write_text("{}")  # an answer saved by an earlier run
+    (r.OUTBOX_DIR / "summaries").mkdir()                # 1.4.0 leftover
+    (r.OUTBOX_DIR / "summaries" / "2026-10-01.json").write_text("{}")
+    try:
+        assert r.poll_once(CFG, False) == 2
+    finally:
+        r.api, r.summarize_day, r.investigate = saved
+    kinds = [e for e in events if e[0] != "post" or "answers" in e[1]]
+    assert kinds[0] == ("post", "/v1/questions/qs_old/answers"), kinds                      # old outbox first
+    i_sum, i_inv = kinds.index(("summary", day(3))), kinds.index(("investigate", day(3)))
+    assert i_sum < i_inv, kinds                                                              # summary before its investigation
+    assert ("summary", day(400)) not in kinds and ("investigate", day(400)) in kinds         # outside the window: not built
+    last_answer = max(i for i, e in enumerate(kinds) if e[0] == "post")
+    backfill = [e for e in kinds if e[0] == "summary" and e[1] != day(3)]
+    assert [e[1] for e in backfill] == [day(1), day(2)], backfill                            # at most 2 more, newest first
+    assert all(kinds.index(e) > last_answer for e in backfill), kinds                        # only after the answers
+    assert not (r.OUTBOX_DIR / "summaries").exists()                                         # leftover removed
+    assert not any("/v1/summaries" in p for p in paths + [e[1] for e in events if e[0] == "post"])
 
 
 if __name__ == "__main__":
@@ -525,12 +593,13 @@ if __name__ == "__main__":
             check_missing_days()
             check_claim()
             check_latest_brief()
+            check_sync_briefs_and_heartbeat_glob()
             scripts_dir = check_collectors()
-            check_flush(scripts_dir)
+            check_heartbeat_and_answers_flush()
             check_summarize_and_investigate(scripts_dir)
             check_atomic_and_corrupt_outbox()
-            check_409_keeps_first_copy()
             check_attempt_cap(scripts_dir)
+            check_poll_order(scripts_dir)
             check_claude_flags()
             check_day_boundary()
             check_prune()

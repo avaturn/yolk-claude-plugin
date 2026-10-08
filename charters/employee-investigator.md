@@ -26,7 +26,7 @@ credibility is the whole system.
 4. If a question needs more depth, you MAY sample individual session transcripts in
    `~/.claude/projects/` (locally — that's allowed) to judge prompt quality, whether
    the person gave guidance, corrected the AI, or tested the output.
-5. Judge the manager's dimensions with evidence, CALIBRATED TO THE PERSON'S ROLE
+5. Identify the day's main focuses with evidence, CALIBRATED TO THE PERSON'S ROLE
    from the profile you are given: for an engineer that means code guidance and
    testing; for a CEO/PM it means meetings held, decks produced, clients engaged,
    decisions made, product checked.
