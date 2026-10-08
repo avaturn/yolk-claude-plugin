@@ -70,6 +70,7 @@ CHARTER = PLUGIN_ROOT / "charters" / "employee-investigator.md"
 SUMMARIZER_CHARTER = PLUGIN_ROOT / "charters" / "day-summarizer.md"
 LAUNCH_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.yolk.agent.plist"
 INSTALL_SCRIPT = HERE / "install_schedule.sh"
+DEFAULT_YOLK_HOME = Path.home() / ".claude" / "yolk"
 INSTALLED_PLUGINS_DIR = (Path.home() / ".claude" / "plugins").resolve()
 COLLECTORS_DIR = HERE / "collectors"
 CLAUDE_TIMEOUT_S = 1500
@@ -549,12 +550,19 @@ def install_schedule():
 def heal_schedule():
     """The poller's launchd plist pins THIS plugin copy's path (.../cache/yolk/yolk/<version>/),
     so after an update it keeps running the old copy, or breaks once Claude Code deletes it.
-    When any run finds the plist pointing elsewhere, re-install it. No plist = the user
-    declined the poller: never create one."""
-    if not LAUNCH_PLIST.exists():
-        return
+    When any run finds the plist pointing elsewhere, re-install it. The poller is mandatory,
+    so a MISSING plist is installed too, but only for a linked, installed plugin on the default
+    YOLK_HOME (never from a dev or test run, never before `claim` wrote the config, and never
+    after `leave`, which deletes agent.json and the plist)."""
     if os.environ.get("XPC_SERVICE_NAME") == "com.yolk.agent" or os.getppid() == 1:
         return  # launchd started this run, so the plist is current; reinstalling would unload (kill) it
+    if not LAUNCH_PLIST.exists():
+        if (CONFIG_FILE.exists() and PLUGIN_ROOT.is_relative_to(INSTALLED_PLUGINS_DIR)
+                and YOLK_HOME == DEFAULT_YOLK_HOME
+                and os.environ.get("YOLK_HOME", str(DEFAULT_YOLK_HOME)) == str(DEFAULT_YOLK_HOME)):
+            log("The background poller was not installed; "
+                + ("installed it." if install_schedule() else "could not install it (run scripts/install_schedule.sh)."))
+        return
     # install_schedule.sh bakes THIS run's YOLK_HOME into the plist: only heal for the real install
     # (the plist's own YOLK_HOME, and a plugin copy Claude Code installed), never from a dev/test run
     try:

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install the Yolk Employee Agent background poller (launchd, every poll_interval_s
+# Install the Yolk Employee Agent background poller (launchd, at load/login and every poll_interval_s
 # from ~/.claude/yolk/agent.json, default 20 min).
 set -euo pipefail
 
@@ -8,7 +8,7 @@ YOLK_HOME="${YOLK_HOME:-$HOME/.claude/yolk}"
 PLIST="$HOME/Library/LaunchAgents/com.yolk.agent.plist"
 OLD_PLIST="$HOME/Library/LaunchAgents/com.hrforai.agent.plist"  # v1.1 git poller
 LOG_DIR="$YOLK_HOME/audit"
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$(dirname "$PLIST")"
 
 CLAUDE_BIN="$(command -v claude || true)"
 PY_BIN="$(command -v python3)"
@@ -37,6 +37,7 @@ cat > "$PLIST" <<EOF
     <key>PATH</key><string>$(dirname "${CLAUDE_BIN:-/usr/local/bin/x}"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>YOLK_HOME</key><string>${YOLK_HOME}</string>
   </dict>
+  <key>RunAtLoad</key><true/>
   <key>StartInterval</key><integer>${INTERVAL}</integer>
   <key>StandardOutPath</key><string>${LOG_DIR}/poller.log</string>
   <key>StandardErrorPath</key><string>${LOG_DIR}/poller.err</string>

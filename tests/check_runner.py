@@ -8,6 +8,7 @@ import io
 import json
 import os
 import plistlib
+import shutil
 import sys
 import tempfile
 import time as time_mod
@@ -585,6 +586,84 @@ def check_poll_order(scripts):
     assert not any("/v1/summaries" in p for p in paths + [e[1] for e in events if e[0] == "post"])
 
 
+def check_heal_installs_missing_plist():
+    clean_dirs()
+    tmp = Path(tempfile.mkdtemp(prefix="yolk-plist-"))
+    saved = (r.LAUNCH_PLIST, r.install_schedule, r.PLUGIN_ROOT, r.INSTALLED_PLUGINS_DIR, r.DEFAULT_YOLK_HOME)
+    env_home = os.environ.get("YOLK_HOME")
+    r.LAUNCH_PLIST = tmp / "com.yolk.agent.plist"  # never the real ~/Library/LaunchAgents
+    r.INSTALLED_PLUGINS_DIR = tmp / "plugins"
+    good_root = r.INSTALLED_PLUGINS_DIR / "cache" / "yolk"
+    r.PLUGIN_ROOT, r.DEFAULT_YOLK_HOME = good_root, r.YOLK_HOME  # the temp home plays the default home
+    calls = []
+    r.install_schedule = lambda: (calls.append(1), True)[1]
+    xpc = os.environ.pop("XPC_SERVICE_NAME", None)
+
+    def attempt(expect, why):
+        before = len(calls)
+        r.heal_schedule()
+        assert len(calls) - before == expect, why
+
+    try:
+        r.CONFIG_FILE.unlink(missing_ok=True)
+        attempt(0, "not linked (before claim wrote the config, or after leave)")
+        r.CONFIG_FILE.write_text("{}")
+        attempt(1, "linked + installed copy + default home + not launchd: install the missing plist")
+        os.environ["YOLK_HOME"] = str(tmp / "elsewhere")
+        attempt(0, "YOLK_HOME env overridden")
+        os.environ["YOLK_HOME"] = env_home
+        r.DEFAULT_YOLK_HOME = tmp / "not-the-home"
+        attempt(0, "YOLK_HOME is not the default home")
+        r.DEFAULT_YOLK_HOME = r.YOLK_HOME
+        r.PLUGIN_ROOT = saved[2]
+        attempt(0, "running from a non-installed copy (dev checkout)")
+        r.PLUGIN_ROOT = good_root
+        os.environ["XPC_SERVICE_NAME"] = "com.yolk.agent"
+        attempt(0, "launched by launchd")
+        del os.environ["XPC_SERVICE_NAME"]
+        # after leave: agent.json is gone, so nothing brings the plist back
+        r.CONFIG_FILE.unlink()
+        attempt(0, "after leave")
+        # leave itself never heals
+        r.CONFIG_FILE.write_text("{}")
+        seen = []
+        real_heal, r.heal_schedule = r.heal_schedule, lambda: seen.append(1)
+        real_cfg, r.load_config, real_leave, r.leave = r.load_config, lambda: CFG, r.leave, lambda cfg: r.CONFIG_FILE.unlink()
+        try:
+            sys.argv = ["employee_runner.py", "leave"]
+            r.main()
+        finally:
+            r.heal_schedule, r.load_config, r.leave = real_heal, real_cfg, real_leave
+        assert not seen and not r.CONFIG_FILE.exists()
+        attempt(0, "after leave, a later run")
+    finally:
+        r.LAUNCH_PLIST, r.install_schedule, r.PLUGIN_ROOT, r.INSTALLED_PLUGINS_DIR, r.DEFAULT_YOLK_HOME = saved
+        r.CONFIG_FILE.unlink(missing_ok=True)
+        if env_home is not None:
+            os.environ["YOLK_HOME"] = env_home
+        if xpc is not None:
+            os.environ["XPC_SERVICE_NAME"] = xpc
+
+
+def check_install_script_plist():
+    """Run the real install_schedule.sh under a temp HOME with a stub launchctl: never the real launchd."""
+    import subprocess
+    home = Path(tempfile.mkdtemp(prefix="yolk-home-"))
+    stub = home / "bin"
+    stub.mkdir()
+    (stub / "launchctl").write_text("#!/bin/sh\necho \"$@\" >> \"$HOME/launchctl.log\"\n")
+    (stub / "launchctl").chmod(0o755)
+    env = {"HOME": str(home), "PATH": f"{stub}:/usr/bin:/bin:{Path(sys.executable).parent}", "YOLK_HOME": str(home / ".claude" / "yolk")}
+    p = subprocess.run(["bash", str(r.HERE / "install_schedule.sh")], env=env, capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stderr
+    plist = plistlib.loads((home / "Library" / "LaunchAgents" / "com.yolk.agent.plist").read_bytes())
+    assert plist["RunAtLoad"] is True and plist["StartInterval"] == 1200 and plist["Label"] == "com.yolk.agent"
+    assert plist["EnvironmentVariables"]["YOLK_HOME"] == env["YOLK_HOME"]
+    assert str(r.HERE / "employee_runner.py") in plist["ProgramArguments"]
+    assert "load" in (home / "launchctl.log").read_text()      # went to the stub, not the real launchd
+    shutil.rmtree(home, ignore_errors=True)
+
+
 if __name__ == "__main__":
     real_stdout = sys.stdout
     try:
@@ -604,6 +683,8 @@ if __name__ == "__main__":
             check_day_boundary()
             check_prune()
             check_heal_schedule()
+            check_heal_installs_missing_plist()
+            check_install_script_plist()
     finally:
         import shutil
         shutil.rmtree(HOME, ignore_errors=True)

@@ -38,7 +38,7 @@ background poller runs it). Check with `claude --version`.
    ```
 3. Open a new Claude Code session, so the `/yolk:*` commands load.
 4. Run `/yolk:setup <invite code>` with the code your manager sent (like `K7QP-3FXA`;
-   case and dashes do not matter). Setup asks for your consent, links this Mac, and offers
+   case and dashes do not matter). Setup asks for your consent, links this Mac, and installs
    the background poller.
 
 ### From a local checkout (development)
@@ -71,8 +71,7 @@ background poller runs it). Check with `claude --version`.
 
 | Command | What it does |
 |---|---|
-| `/yolk:setup <code>` | Consent, link this Mac with the invite, install the background poller |
-| `/yolk:answer` | Answer pending questions now, then build missing local summaries (otherwise the poller runs every 20 min) |
+| `/yolk:setup <code>` | Consent, link this Mac with the invite, install the background poller (starts at once, at every login, and every 20 min) |
 | `/yolk:brief [date]` | Your coach brief |
 | `/yolk:report [date]` | Your own daily activity report (the local summary of a day) |
 | `/yolk:leave` | Revoke this Mac's token and stop the poller |
@@ -88,7 +87,7 @@ Yolk server ◀──sanitized answers──┘
 Yolk server ──coach brief──▶ ~/.claude/yolk/briefs
 ```
 
-Every 20 minutes the poller sends unsent answers, fetches briefs, then for each question set builds that
+The poller runs at load, at every login and every 20 minutes; each run sends unsent answers, fetches briefs, then for each question set builds that
 day's summary if missing and answers it. Only after the answers are out does it fill in the local summary
 of other finished days (up to 2 per poll) from 7 days ago to yesterday. A day whose summary fails to build 3 times is
 given up on (`audit/summary-<date>.failed.json`, local). A day is summarized only after it has ended in
@@ -105,6 +104,6 @@ terminal), so grant it to that binary — `/yolk:setup` and `install_schedule.sh
 path. Without it the summary simply notes that Screen Time was unreadable.
 
 **Updates.** The poller's launchd plist points at the installed plugin copy. After an update, the
-next time the runner runs (`/yolk:setup`, `/yolk:answer` or `/yolk:brief`; `/yolk:report` and `/yolk:leave` do not run it) the plugin re-points the plist at the new copy (only for the real installed plugin and
-your real `~/.claude/yolk`; never from a dev checkout or test home, and never if you did not install the poller). The two prompts the agent gives
+next time the runner runs (`/yolk:setup` or `/yolk:brief`, and the poller itself; `/yolk:report` and `/yolk:leave` do not run it) the plugin re-points the plist at the new copy (only for the real installed plugin and
+your real `~/.claude/yolk`; never from a dev checkout or test home, and a missing plist is installed only for a linked, installed plugin using the default `~/.claude/yolk`; `/yolk:leave` removes it for good). The two prompts the agent gives
 Claude live in `charters/`, not `agents/`, so they do not show up as subagents in your sessions.
