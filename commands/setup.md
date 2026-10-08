@@ -1,5 +1,5 @@
 ---
-description: Link this Mac to Yolk — consent, claim your invite, background schedule
+description: This plugin coaches you to reach the team goal in the most efficient way. It analyzes your workflows and aligns them to team goals.
 argument-hint: "<invite code from your manager, e.g. K7QP-3FXA>"
 ---
 
