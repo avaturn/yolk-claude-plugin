@@ -1,14 +1,14 @@
 {
-  "name": "hrforai",
+  "name": "yolk",
   "owner": {
     "name": "Sergei Sherman",
     "email": "sergei@in3d.io"
   },
   "plugins": [
     {
-      "name": "hrforai-agent",
+      "name": "yolk",
       "source": "./",
-      "description": "Employee-side agent for the HR-for-AI daily check-in. Sanitized answers only; no manager logic on this machine."
+      "description": "Yolk employee agent: answers the Manager AI's daily check-in with sanitized answers; shows your report and coach brief. No manager logic on this Mac."
     }
   ]
 }
