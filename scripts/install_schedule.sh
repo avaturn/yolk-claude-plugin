@@ -47,4 +47,6 @@ EOF
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 echo "Installed: com.yolk.agent (polls every $((INTERVAL / 60)) min). Logs: $LOG_DIR"
+# launchd runs python3 itself, not your terminal: Screen Time needs Full Disk Access for THIS binary
+echo "Full Disk Access (System Settings > Privacy & Security): add $("$PY_BIN" -c 'import os,sys; print(os.path.realpath(sys.executable))')"
 [ -n "$CLAUDE_BIN" ] || echo "WARNING: 'claude' CLI not found on PATH — investigations will fail until it is installed."
