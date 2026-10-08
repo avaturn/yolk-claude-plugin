@@ -16,6 +16,8 @@ import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from _common import emit_error
+
 CORE_DATA_EPOCH = 978307200
 DB = Path.home() / "Library/Application Support/Knowledge/knowledgeC.db"
 
@@ -42,22 +44,29 @@ def main():
     start = day.replace(hour=0, minute=0, second=0).timestamp() - CORE_DATA_EPOCH
     end = start + 86400
 
-    with tempfile.TemporaryDirectory() as tmp:
-        for suffix in ("", "-wal", "-shm"):
-            src = Path(str(DB) + suffix)
-            if src.exists():
-                shutil.copy2(src, Path(tmp) / src.name)
-        con = sqlite3.connect(Path(tmp) / DB.name)
-        rows = con.execute(
-            """SELECT ZVALUESTRING,
-                      ROUND(SUM(ZENDDATE-ZSTARTDATE)/60.0, 1) AS mins,
-                      MIN(ZSTARTDATE), MAX(ZENDDATE)
-               FROM ZOBJECT
-               WHERE ZSTREAMNAME='/app/usage' AND ZSTARTDATE >= ? AND ZSTARTDATE < ?
-               GROUP BY ZVALUESTRING ORDER BY mins DESC""",
-            (start, end),
-        ).fetchall()
-        con.close()
+    try:
+        if not DB.exists():
+            emit_error(args.date, "no_database")
+        with tempfile.TemporaryDirectory() as tmp:
+            for suffix in ("", "-wal", "-shm"):
+                src = Path(str(DB) + suffix)
+                if src.exists():
+                    shutil.copy2(src, Path(tmp) / src.name)
+            con = sqlite3.connect(Path(tmp) / DB.name)
+            rows = con.execute(
+                """SELECT ZVALUESTRING,
+                          ROUND(SUM(ZENDDATE-ZSTARTDATE)/60.0, 1) AS mins,
+                          MIN(ZSTARTDATE), MAX(ZENDDATE)
+                   FROM ZOBJECT
+                   WHERE ZSTREAMNAME='/app/usage' AND ZSTARTDATE >= ? AND ZSTARTDATE < ?
+                   GROUP BY ZVALUESTRING ORDER BY mins DESC""",
+                (start, end),
+            ).fetchall()
+            con.close()
+    except PermissionError:
+        emit_error(args.date, "no_permission")
+    except (OSError, sqlite3.Error):
+        emit_error(args.date, "unreadable")
 
     apps = []
     for bundle, mins, first, last in rows:

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Collect per-day Chrome browsing activity across all local Chrome profiles.
+"""Collect per-day browsing activity across all profiles of the Chromium-family browsers.
 
 Purpose: close the biggest coverage gap — for many roles (CEO, PM, sales) the
 real work happens in the browser: email, decks, meetings, Linear, Slack, docs.
 Output is LOCAL ONLY. The Employee Agent summarizes it at business level
 (clients, meetings, docs worked on); raw URLs never leave the machine.
 
-Chrome epoch = microseconds since 1601-01-01 (offset 11644473600 s).
+Chrome epoch = microseconds since 1601-01-01 (offset 11644473600 s). All browsers
+below share Chrome's History schema.
 
 Usage: browser_history.py [--date YYYY-MM-DD]
 """
@@ -20,8 +21,19 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+from _common import emit_error
+
 CHROME_EPOCH_OFFSET = 11644473600
-CHROME_DIR = Path.home() / "Library/Application Support/Google/Chrome"
+APP_SUPPORT = Path.home() / "Library/Application Support"
+# ponytail: Safari (History.db, different schema, needs Full Disk Access) is the upgrade path
+BROWSERS = {
+    "Chrome": "Google/Chrome",
+    "Arc": "Arc/User Data",
+    "Brave": "BraveSoftware/Brave-Browser",
+    "Edge": "Microsoft Edge",
+    "Chromium": "Chromium",
+    "Vivaldi": "Vivaldi",
+}
 GAP_MINUTES = 10
 MAX_TIMELINE = 220
 
@@ -33,24 +45,25 @@ def day_bounds_epoch(date_str):
 
 
 def profile_dirs():
-    if not CHROME_DIR.exists():
-        return []
-    return [p for p in CHROME_DIR.iterdir()
-            if (p / "History").exists()
-            and not p.name.startswith(("Guest", "System"))]
+    """[(browser name, profile dir)] for every profile that has a History file."""
+    found = []
+    for browser, rel in BROWSERS.items():
+        base = APP_SUPPORT / rel
+        if not base.is_dir():
+            continue
+        found += [(browser, p) for p in sorted(base.iterdir())
+                  if (p / "History").exists()
+                  and not p.name.startswith(("Guest", "System"))]
+    return found
 
 
 def read_visits(history_path, start, end):
-    rows = []
     with tempfile.TemporaryDirectory() as tmp:
         db = Path(tmp) / "History"
+        shutil.copy2(history_path, db)
+        con = sqlite3.connect(db)
         try:
-            shutil.copy2(history_path, db)
-        except OSError:
-            return rows
-        try:
-            con = sqlite3.connect(db)
-            rows = con.execute(
+            return con.execute(
                 """SELECT v.visit_time/1000000 - ?, u.url, u.title
                    FROM visits v JOIN urls u ON v.url = u.id
                    WHERE v.visit_time/1000000 - ? >= ?
@@ -59,10 +72,8 @@ def read_visits(history_path, start, end):
                 (CHROME_EPOCH_OFFSET, CHROME_EPOCH_OFFSET, start,
                  CHROME_EPOCH_OFFSET, end),
             ).fetchall()
+        finally:
             con.close()
-        except sqlite3.Error:
-            pass
-    return rows
 
 
 def merge_blocks(epochs, gap_s=GAP_MINUTES * 60):
@@ -84,17 +95,32 @@ def main():
     args = ap.parse_args()
     start, end = day_bounds_epoch(args.date)
 
+    profiles = profile_dirs()
+    if not profiles:
+        emit_error(args.date, "no_browser")
     visits = []
-    for prof in profile_dirs():
-        for epoch, url, title in read_visits(prof / "History", start, end):
-            visits.append((epoch, url, title or ""))
+    readable = denied = 0
+    for browser, prof in profiles:
+        try:
+            rows = read_visits(prof / "History", start, end)
+        except PermissionError:
+            denied += 1
+            continue
+        except (OSError, sqlite3.Error):
+            continue
+        readable += 1
+        visits += [(epoch, url, title or "", browser) for epoch, url, title in rows]
+    if not readable:
+        emit_error(args.date, "no_permission" if denied else "unreadable")
     visits.sort()
 
     domains = {}
     hourly = {}
+    per_browser = {}
     timeline = []
     last_title = None
-    for epoch, url, title in visits:
+    for epoch, url, title, browser in visits:
+        per_browser[browser] = per_browser.get(browser, 0) + 1
         host = (urlparse(url).hostname or "?").removeprefix("www.")
         domains[host] = domains.get(host, 0) + 1
         hour = datetime.fromtimestamp(epoch).strftime("%H")
@@ -103,6 +129,7 @@ def main():
         if t and t != last_title:
             timeline.append({
                 "time": datetime.fromtimestamp(epoch).strftime("%H:%M"),
+                "browser": browser,
                 "domain": host,
                 "title": t[:90],
             })
@@ -120,6 +147,7 @@ def main():
     json.dump({
         "date": args.date,
         "total_visits": len(visits),
+        "visits_per_browser": per_browser,
         "active_browsing_minutes": active_minutes,
         "active_blocks": [f"{fmt(b[0])}–{fmt(b[1])}" for b in blocks],
         "visits_per_hour": dict(sorted(hourly.items())),

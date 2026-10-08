@@ -16,6 +16,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from _common import decode_project_dir, emit_error, tilde
+
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 GAP_MINUTES = 15          # bridge gaps shorter than this into one active block
 PAD_MINUTES = 2           # padding around isolated events
@@ -188,25 +190,35 @@ def main():
     excluded = {s.strip() for s in args.exclude_sessions.split(",") if s.strip()}
     day_start, day_end = local_day_bounds(args.date)
 
+    if not PROJECTS_DIR.is_dir():
+        emit_error(args.date, "no_projects")
+    try:
+        proj_dirs = sorted(PROJECTS_DIR.iterdir())
+    except PermissionError:
+        emit_error(args.date, "no_permission")
+
     projects = {}
     all_events = []
-    for proj_dir in sorted(PROJECTS_DIR.iterdir()):
+    for proj_dir in proj_dirs:
         if not proj_dir.is_dir():
             continue
         sessions = []
         for jf in proj_dir.glob("*.jsonl"):
             if jf.stem in excluded:
                 continue
-            mtime = datetime.fromtimestamp(jf.stat().st_mtime, tz=timezone.utc)
-            if mtime < day_start - timedelta(days=2):
-                continue  # can't contain events for the target day
-            s = analyze_session(jf, day_start.astimezone(timezone.utc),
-                                day_end.astimezone(timezone.utc))
+            try:
+                mtime = datetime.fromtimestamp(jf.stat().st_mtime, tz=timezone.utc)
+                if mtime < day_start - timedelta(days=2):
+                    continue  # can't contain events for the target day
+                s = analyze_session(jf, day_start.astimezone(timezone.utc),
+                                    day_end.astimezone(timezone.utc))
+            except OSError:
+                continue
             if s:
                 all_events.extend(s.pop("events"))
                 sessions.append(s)
         if sessions:
-            name = proj_dir.name.replace("-Users-sergeisherman", "~").replace("-", "/")
+            name = tilde(decode_project_dir(proj_dir.name))
             total_prompts = sum(len(s["user_prompts"]) for s in sessions)
             projects[name] = {
                 "sessions": sessions,
