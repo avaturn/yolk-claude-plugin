@@ -40,6 +40,8 @@ background poller runs it). Check with `claude --version`.
 4. Run `/yolk:setup <invite code>` with the code your manager sent (like `K7QP-3FXA`;
    case and dashes do not matter). Setup asks for your consent, links this Mac, and installs
    the background poller.
+5. Turn on auto-update once: `/plugin` → Marketplaces → `yolk` → Enable auto-update. Without it you
+   update by hand (see Updates). Skip this if your organization manages it (the toggle is then hidden).
 
 ### From a local checkout (development)
 
@@ -103,7 +105,40 @@ background poller runs as the `python3` binary named in its launchd plist (not y
 terminal), so grant it to that binary — `/yolk:setup` and `install_schedule.sh` print its
 path. Without it the summary simply notes that Screen Time was unreadable.
 
-**Updates.** The poller's launchd plist points at the installed plugin copy. After an update, the
-next time the runner runs (`/yolk:setup` or `/yolk:brief`, and the poller itself; `/yolk:report` and `/yolk:leave` do not run it) the plugin re-points the plist at the new copy (only for the real installed plugin and
-your real `~/.claude/yolk`; never from a dev checkout or test home, and a missing plist is installed only for a linked, installed plugin using the default `~/.claude/yolk`; `/yolk:leave` removes it for good). The two prompts the agent gives
+**Updates.** launchd does not run the plugin copy directly: the poller's plist runs
+`~/.claude/yolk/bin/launcher.py`, a copy of `scripts/launcher.py` that never moves and hands over to the
+newest installed plugin version (Claude Code keeps each version in its own directory and deletes an
+old one 14 days after an update). So an update reaches the poller by itself on its next run. When
+`/yolk:setup` or `/yolk:brief` runs, the plugin also re-installs the plist if the launcher copy is
+outdated or the plist is an older version-pinned one, and installs a missing plist (only for a linked,
+installed plugin on the default `~/.claude/yolk`; never from a dev checkout or test home; `/yolk:leave`
+removes it for good). With auto-update on, nothing else is needed. By hand: `claude plugin update yolk@yolk`
+updates the plugin (`claude plugin marketplace update yolk` only refreshes the catalog); a new session
+loads it, or run `/reload-plugins`. The two prompts the agent gives
 Claude live in `charters/`, not `agents/`, so they do not show up as subagents in your sessions.
+
+## For admins
+
+To make every machine register the `yolk` marketplace, install the plugin and keep it up to date, set
+this in managed settings (field names and nesting copied from
+[Manage Claude Code plugins for your organization](https://code.claude.com/docs/en/plugins/org),
+sections "Pre-install and require plugins" and "Set update policy"; the key is the marketplace's own `name`,
+here `yolk`):
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "yolk": {
+      "source": { "source": "github", "repo": "avaturn/yolk-plugin-agent" },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": {
+    "yolk@yolk": true
+  }
+}
+```
+
+With `autoUpdate` set in managed settings the user's `/plugin` toggle is refused. `enabledPlugins` is optional:
+it installs and force-enables the plugin at the next session start (users still run `/yolk:setup <code>`).
+The repo is private, so each machine needs git access to it.

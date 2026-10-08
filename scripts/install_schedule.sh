@@ -8,7 +8,10 @@ YOLK_HOME="${YOLK_HOME:-$HOME/.claude/yolk}"
 PLIST="$HOME/Library/LaunchAgents/com.yolk.agent.plist"
 OLD_PLIST="$HOME/Library/LaunchAgents/com.hrforai.agent.plist"  # v1.1 git poller
 LOG_DIR="$YOLK_HOME/audit"
-mkdir -p "$LOG_DIR" "$(dirname "$PLIST")"
+mkdir -p "$LOG_DIR" "$(dirname "$PLIST")" "$YOLK_HOME/bin"
+# launchd runs a launcher at a path that never changes: Claude Code deletes old plugin version dirs
+LAUNCHER="$YOLK_HOME/bin/launcher.py"
+cp "$PLUGIN_ROOT/scripts/launcher.py" "$LAUNCHER"
 
 CLAUDE_BIN="$(command -v claude || true)"
 PY_BIN="$(command -v python3)"
@@ -30,7 +33,7 @@ cat > "$PLIST" <<EOF
   <key>ProgramArguments</key>
   <array>
     <string>${PY_BIN}</string>
-    <string>${PLUGIN_ROOT}/scripts/employee_runner.py</string>
+    <string>${LAUNCHER}</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

@@ -548,14 +548,15 @@ def install_schedule():
 
 
 def heal_schedule():
-    """The poller's launchd plist pins THIS plugin copy's path (.../cache/yolk/yolk/<version>/),
-    so after an update it keeps running the old copy, or breaks once Claude Code deletes it.
-    When any run finds the plist pointing elsewhere, re-install it. The poller is mandatory,
-    so a MISSING plist is installed too, but only for a linked, installed plugin on the default
-    YOLK_HOME (never from a dev or test run, never before `claim` wrote the config, and never
+    """Keep the poller's launchd plist and launcher current. The plist runs YOLK_HOME/bin/launcher.py
+    (a copy of scripts/launcher.py), which hands over to the newest installed plugin version, so a
+    plugin update reaches the poller by itself. Re-install when the launcher copy differs from this
+    version's, or the plist does not point at the launcher (an older, version-pinned plist). The
+    poller is mandatory, so a MISSING plist is installed too. Only for a linked, installed plugin on
+    the default YOLK_HOME (never from a dev or test run, never before `claim` wrote the config, never
     after `leave`, which deletes agent.json and the plist)."""
     if os.environ.get("XPC_SERVICE_NAME") == "com.yolk.agent" or os.getppid() == 1:
-        return  # launchd started this run, so the plist is current; reinstalling would unload (kill) it
+        return  # launchd started this run, so reinstalling would unload (kill) it
     if not LAUNCH_PLIST.exists():
         if (CONFIG_FILE.exists() and PLUGIN_ROOT.is_relative_to(INSTALLED_PLUGINS_DIR)
                 and YOLK_HOME == DEFAULT_YOLK_HOME
@@ -564,7 +565,6 @@ def heal_schedule():
                 + ("installed it." if install_schedule() else "could not install it (run scripts/install_schedule.sh)."))
         return
     # install_schedule.sh bakes THIS run's YOLK_HOME into the plist: only heal for the real install
-    # (the plist's own YOLK_HOME, and a plugin copy Claude Code installed), never from a dev/test run
     try:
         plist = plistlib.loads(LAUNCH_PLIST.read_bytes())
     except Exception:  # noqa: BLE001
@@ -574,13 +574,17 @@ def heal_schedule():
         return
     if not PLUGIN_ROOT.is_relative_to(INSTALLED_PLUGINS_DIR):
         return
-    args = plist.get("ProgramArguments") or []
-    me = os.path.realpath(HERE / "employee_runner.py")  # realpath: the cache dir may sit behind a symlink
-    if any(isinstance(a, str) and os.path.realpath(a) == me for a in args):
+    installed = YOLK_HOME / "bin" / "launcher.py"
+    points_at_launcher = any(isinstance(a, str) and os.path.realpath(a) == os.path.realpath(installed)
+                             for a in plist.get("ProgramArguments") or [])
+    try:
+        current = installed.read_bytes() == (HERE / "launcher.py").read_bytes()
+    except OSError:
+        current = False
+    if points_at_launcher and current:
         return
-    log("The background poller pointed at another plugin copy; "
-        + ("re-pointed it at this one." if install_schedule()
-           else "could not re-point it (run scripts/install_schedule.sh)."))
+    log("The background poller " + ("ran an outdated launcher" if points_at_launcher else "did not use the launcher")
+        + "; " + ("updated it." if install_schedule() else "could not update it (run scripts/install_schedule.sh)."))
 
 
 def to_contract(raw):

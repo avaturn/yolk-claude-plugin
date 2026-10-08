@@ -458,7 +458,6 @@ def check_heal_schedule():
     calls = []
     r.install_schedule = lambda: (calls.append(1), result[0])[1]
     result = [True]
-    script = r.HERE / "employee_runner.py"
 
     real_root, real_plugins = r.PLUGIN_ROOT, r.INSTALLED_PLUGINS_DIR
     r.INSTALLED_PLUGINS_DIR = tmp / "plugins"           # pretend this copy is the installed plugin
@@ -471,17 +470,28 @@ def check_heal_schedule():
 
     xpc = os.environ.pop("XPC_SERVICE_NAME", None)
     try:
-        r.heal_schedule()                                                # no plist: declined poller stays declined
+        r.heal_schedule()                                                # no plist, not linked: nothing is installed
         assert not calls and not r.LAUNCH_PLIST.exists()
-        plist("/usr/bin/python3", str(script))                            # current: untouched
+        launcher = r.YOLK_HOME / "bin" / "launcher.py"
+        launcher.parent.mkdir(exist_ok=True)
+        launcher.write_bytes((r.HERE / "launcher.py").read_bytes())      # the installed copy is current
+        plist("/usr/bin/python3", str(launcher))                          # current: untouched
         r.heal_schedule()
         assert not calls
-        link = tmp / "linked-scripts"
-        link.symlink_to(r.HERE)
-        plist("/usr/bin/python3", str(link / "employee_runner.py"))       # same file through a symlink: current
+        link = tmp / "linked-bin"
+        link.symlink_to(launcher.parent)
+        plist("/usr/bin/python3", str(link / "launcher.py"))              # same file through a symlink: current
         r.heal_schedule()
         assert not calls
+        # a launcher copy that differs from this version's is re-copied (install re-runs)
+        plist("/usr/bin/python3", str(launcher))
+        launcher.write_text("# an older launcher\n")
+        r.heal_schedule()
+        assert len(calls) == 1 and "outdated launcher" in agent_log()
+        calls.clear()
+        launcher.write_bytes((r.HERE / "launcher.py").read_bytes())
         before = agent_log()
+        # a version-pinned plist (1.3 - 1.6.0) migrates to the launcher
         plist("/usr/bin/python3", "/old/cache/yolk/yolk/1.3.1/scripts/employee_runner.py")  # stale
         os.environ["XPC_SERVICE_NAME"] = "com.yolk.agent"                 # started by launchd itself: never reinstall
         r.heal_schedule()
@@ -496,7 +506,7 @@ def check_heal_schedule():
         r.heal_schedule()
         assert len(calls) == 1
         added = agent_log()[len(before):].strip().splitlines()
-        assert len(added) == 1 and "re-pointed" in added[0], added          # exactly one log line
+        assert len(added) == 1 and "did not use the launcher" in added[0], added          # exactly one log line
         # a dev/test run must never re-point the real poller (install_schedule.sh would bake in ITS env)
         plist("/old/x/employee_runner.py", home="/some/other/yolk-home")   # the plist belongs to another YOLK_HOME
         r.heal_schedule()
@@ -514,7 +524,7 @@ def check_heal_schedule():
         assert len(calls) == 2
         result[0] = False                                                  # a failing install is logged, not raised
         r.heal_schedule()
-        assert len(calls) == 3 and "could not re-point" in agent_log()
+        assert len(calls) == 3 and "could not update it" in agent_log()
         # wired into main() for every action but leave
         seen = []
         real_heal, r.heal_schedule = r.heal_schedule, lambda: seen.append(1)
@@ -645,6 +655,62 @@ def check_heal_installs_missing_plist():
             os.environ["XPC_SERVICE_NAME"] = xpc
 
 
+def check_launcher():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("yolk_launcher", r.HERE / "launcher.py")
+    L = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(L)
+    plugins = Path(tempfile.mkdtemp(prefix="yolk-cache-"))
+    assert L.find_runner(plugins) is None                                       # no cache at all
+    cache = plugins / "cache" / "yolk" / "yolk"
+    cache.mkdir(parents=True)
+    assert L.find_runner(plugins) is None                                       # empty cache
+
+    def make(version, orphaned=False, runner=True):
+        d = cache / version
+        (d / "scripts").mkdir(parents=True)
+        if runner:
+            (d / "scripts" / "employee_runner.py").write_text("")
+        if orphaned:
+            (d / ".orphaned_at").write_text("1")
+        return d
+    make("1.5.0"); make("1.6.0", orphaned=True); make("1.6.1"); make("1.10.0"); make("9.9.9", runner=False)
+    assert L.find_runner(plugins).parent.parent.name == "1.10.0"                # numeric, not string, order
+    (cache / "1.10.0" / ".orphaned_at").write_text("1")
+    assert L.find_runner(plugins).parent.parent.name == "1.6.1"                 # orphaned and runner-less skipped
+    # installed_plugins.json: the recorded active install wins when it is usable
+    (plugins / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {"yolk@yolk": [
+        {"scope": "user", "installPath": str(cache / "1.5.0"), "version": "1.5.0"}], "other@x": [{"installPath": "/zzz"}]}}))
+    assert L.find_runner(plugins).parent.parent.name == "1.5.0"
+    (plugins / "installed_plugins.json").write_text(json.dumps({"plugins": {"yolk@yolk": [
+        {"installPath": str(cache / "1.10.0")}]}}))                             # recorded but orphaned: fall back
+    assert L.find_runner(plugins).parent.parent.name == "1.6.1"
+    (plugins / "installed_plugins.json").write_text("{broken")                  # unreadable: fall back
+    assert L.find_runner(plugins).parent.parent.name == "1.6.1"
+    # nothing found: one log line in agent.log, exit 0 (no exec)
+    home = Path(tempfile.mkdtemp(prefix="yolk-lh-"))
+    old = (L.find_runner, os.environ.get("YOLK_HOME"))
+    L.find_runner = lambda: None
+    os.environ["YOLK_HOME"] = str(home)
+    try:
+        L.main()
+    finally:
+        L.find_runner = old[0]
+        os.environ["YOLK_HOME"] = old[1]
+    lines = (home / "audit" / "agent.log").read_text().strip().splitlines()
+    assert len(lines) == 1 and "no installed Yolk plugin" in lines[0]
+    # the exec hands the arguments over to the found runner
+    out = plugins / "out.txt"
+    (cache / "1.6.1" / "scripts" / "employee_runner.py").write_text(
+        f"import sys; open({str(out)!r}, 'w').write(' '.join(sys.argv[1:]))")
+    import subprocess
+    env = dict(os.environ, HOME=str(plugins / "fakehome"))
+    (plugins / "fakehome" / ".claude").mkdir(parents=True)
+    (plugins / "fakehome" / ".claude" / "plugins").symlink_to(plugins)
+    subprocess.run([sys.executable, str(r.HERE / "launcher.py"), "summarize", "--limit", "1"], env=env, timeout=30)
+    assert out.read_text() == "summarize --limit 1"
+
+
 def check_install_script_plist():
     """Run the real install_schedule.sh under a temp HOME with a stub launchctl: never the real launchd."""
     import subprocess
@@ -659,7 +725,10 @@ def check_install_script_plist():
     plist = plistlib.loads((home / "Library" / "LaunchAgents" / "com.yolk.agent.plist").read_bytes())
     assert plist["RunAtLoad"] is True and plist["StartInterval"] == 1200 and plist["Label"] == "com.yolk.agent"
     assert plist["EnvironmentVariables"]["YOLK_HOME"] == env["YOLK_HOME"]
-    assert str(r.HERE / "employee_runner.py") in plist["ProgramArguments"]
+    launcher = home / ".claude" / "yolk" / "bin" / "launcher.py"
+    assert plist["ProgramArguments"][1] == str(launcher)            # the plist runs the stable launcher
+    assert launcher.read_bytes() == (r.HERE / "launcher.py").read_bytes()   # ...and it was copied
+    assert "employee_runner.py" not in json.dumps(plist["ProgramArguments"])
     assert "load" in (home / "launchctl.log").read_text()      # went to the stub, not the real launchd
     shutil.rmtree(home, ignore_errors=True)
 
@@ -685,6 +754,7 @@ if __name__ == "__main__":
             check_heal_schedule()
             check_heal_installs_missing_plist()
             check_install_script_plist()
+            check_launcher()
     finally:
         import shutil
         shutil.rmtree(HOME, ignore_errors=True)
