@@ -26,10 +26,10 @@ background poller runs it). Check with `claude --version`.
 
 ### From GitHub (employees)
 
-1. Ask your manager for read access to the plugin repo (today `gregory156/yolk-plugin-agent`).
+1. Ask your manager for read access to the plugin repo `avaturn/yolk-plugin-agent`.
 2. In Claude Code, add the marketplace and install the plugin:
    ```
-   /plugin marketplace add gregory156/yolk-plugin-agent
+   /plugin marketplace add avaturn/yolk-plugin-agent
    /plugin install yolk@yolk
    ```
 3. Open a new Claude Code session, so the `/yolk:*` commands load.
@@ -55,8 +55,8 @@ background poller runs it). Check with `claude --version`.
 
 ### Server address
 
-- The invite code carries no server address. The plugin uses `YOLK_SERVER`, default `http://localhost:8080` (until the
-  production server is deployed).
+- The invite code carries no server address. The plugin uses `https://plugin.dev.yolk.coach`.
+- To use another server (a local one), start Claude Code with `YOLK_SERVER=<base URL>` set.
 - Plain HTTP is accepted only for `localhost`, `127.0.0.1` and `::1`.
 
 ### Uninstall

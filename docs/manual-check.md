@@ -126,5 +126,5 @@ local database) and `rm -rf ~/.claude/yolk`.
 
 - **D5.** A brief for a date older than your newest local brief never arrives. Check dates
   oldest first.
-- The invite code carries no server address; without `YOLK_SERVER` the plugin uses `http://localhost:8080` (Keycloak here).
+- The invite code carries no server address; without `YOLK_SERVER` the plugin uses `https://plugin.dev.yolk.coach`.
 - `R` is pinned to plugin version 1.3.0.

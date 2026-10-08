@@ -44,8 +44,8 @@ from sanitizer import sanitize_answers  # noqa: E402
 
 PLUGIN_ROOT = HERE.parent
 VERSION = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())["version"]
-# base URL for bare invite codes: the local server for now; production is https://yolk-plugin.dev.yolk.coach
-DEFAULT_SERVER = os.environ.get("YOLK_SERVER", "http://localhost:8080").rstrip("/")
+# the server invite codes are claimed on; YOLK_SERVER overrides it (local checks)
+DEFAULT_SERVER = os.environ.get("YOLK_SERVER", "https://plugin.dev.yolk.coach").rstrip("/")
 YOLK_HOME = Path(os.environ.get("YOLK_HOME", str(Path.home() / ".claude" / "yolk")))
 CONFIG_FILE = YOLK_HOME / "agent.json"
 PROFILE_FILE = YOLK_HOME / "profile.md"
