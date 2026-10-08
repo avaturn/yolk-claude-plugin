@@ -1,6 +1,6 @@
 ---
 description: Link this Mac to Yolk — consent, claim your invite, background schedule
-argument-hint: "<invite link or code from your manager, e.g. https://…/join/K7QP-3FXA>"
+argument-hint: "<invite code from your manager, e.g. K7QP-3FXA>"
 ---
 
 Set up the Yolk Employee Agent on this Mac. This is the ONE approval moment — after this, the agent answers the manager's check-ins in the background without nagging.
@@ -11,11 +11,11 @@ Set up the Yolk Employee Agent on this Mac. This is the ONE approval moment — 
    - This plugin contains NO manager logic and needs NO API key — investigations run on the user's own Claude subscription. The manager's daily report about them, and a coach brief built from it, come back to `~/.claude/yolk/` — they read exactly what the manager reads, with `/yolk:report` and `/yolk:brief`. Their device token can only ever read their own questions, reports and briefs.
    - Ask for explicit confirmation before continuing.
 
-2. **Invite**: use `$ARGUMENTS` if present (a full link or a bare code), otherwise ask for the invite link their manager sent.
+2. **Invite**: use `$ARGUMENTS` if present (the code, like `K7QP-3FXA`; case and dashes do not matter), otherwise ask for the invite code their manager sent. If it is a link, ask for the code instead.
 
 3. **Link this Mac**:
    ```
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/employee_runner.py" claim "<invite link>"
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/employee_runner.py" claim "<invite code>"
    ```
    The script stores the device token itself. Never read, print, or `cat` `~/.claude/yolk/agent.json` — the token must not enter this conversation's transcript. If the script says the invite "isn't valid" or was "already used or expired", tell the user to ask their manager for a new invite and stop.
 

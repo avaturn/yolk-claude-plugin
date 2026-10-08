@@ -33,8 +33,8 @@ background poller runs it). Check with `claude --version`.
    /plugin install yolk@yolk
    ```
 3. Open a new Claude Code session, so the `/yolk:*` commands load.
-4. Run `/yolk:setup <invite link>` with the full link your manager sent
-   (`https://…/join/<CODE>`). Setup asks for your consent, links this Mac, and offers
+4. Run `/yolk:setup <invite code>` with the code your manager sent (like `K7QP-3FXA`;
+   case and dashes do not matter). Setup asks for your consent, links this Mac, and offers
    the background poller.
 
 ### From a local checkout (development)
@@ -55,8 +55,7 @@ background poller runs it). Check with `claude --version`.
 
 ### Server address
 
-- The invite link carries the server address. Use the full link.
-- A bare invite code goes to `YOLK_SERVER`, default `http://localhost:8080` (until the
+- The invite code carries no server address. The plugin uses `YOLK_SERVER`, default `http://localhost:8080` (until the
   production server is deployed).
 - Plain HTTP is accepted only for `localhost`, `127.0.0.1` and `::1`.
 
@@ -70,7 +69,7 @@ To test the plugin against a local server by hand, follow [docs/manual-check.md]
 
 | Command | What it does |
 |---|---|
-| `/yolk:setup <link>` | Consent, link this Mac with the invite, install the background poller |
+| `/yolk:setup <code>` | Consent, link this Mac with the invite, install the background poller |
 | `/yolk:answer` | Answer pending questions now (otherwise the poller checks every 20 min) |
 | `/yolk:brief [date]` | Your coach brief |
 | `/yolk:report [date]` | The report your manager received about you |

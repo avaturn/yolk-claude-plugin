@@ -15,7 +15,7 @@ Data (YOLK_HOME, default ~/.claude/yolk/):
   audit/                agent.log, <set id>.raw.json (before the gate), <set id>.sent.json
 
 Usage: employee_runner.py [poll] [--verbose]    one poll cycle (what launchd runs)
-       employee_runner.py claim <invite link>   link this Mac (/yolk:setup)
+       employee_runner.py claim <invite code>   link this Mac (/yolk:setup)
        employee_runner.py sync                  fetch briefs + heartbeat
        employee_runner.py leave                 revoke this Mac's device token
 """
@@ -90,7 +90,7 @@ def write_private(path, text):
 
 def load_config():
     if not CONFIG_FILE.exists():
-        raise SystemExit("This Mac is not linked to Yolk. Run /yolk:setup <invite link>.")
+        raise SystemExit("This Mac is not linked to Yolk. Run /yolk:setup <invite code>.")
     return json.loads(CONFIG_FILE.read_text())
 
 
@@ -117,11 +117,11 @@ def api(cfg, method, path, body=None, auth=True):
         return e.code, None
 
 
-def claim(link):
-    m = re.match(r"\s*(https?://[^/\s]+)/join/([^/?#\s]+)", link)
-    server, code = (m.group(1), m.group(2)) if m else (DEFAULT_SERVER, link.strip())
-    if not server:
-        raise SystemExit("Paste the full invite link from your manager (https://…/join/CODE).")
+def claim(code):
+    code = code.strip()
+    if not re.fullmatch(r"[A-Za-z0-9 -]+", code):
+        raise SystemExit("Give the invite code from your manager (like K7QP-3FXA), not a link.")
+    server = DEFAULT_SERVER
     u = urllib.parse.urlparse(server)
     if u.scheme != "https" and u.hostname not in LOOPBACK:
         raise SystemExit("Refusing a non-HTTPS server: the device token must not travel unencrypted.")
@@ -131,7 +131,7 @@ def claim(link):
     status, body = api({"server": server}, "POST", "/v1/devices/claim",
                        {"invite_code": code, "device": device}, auth=False)
     if status == 404:
-        raise SystemExit("This invite isn't valid. Check the link with your manager.")
+        raise SystemExit("This invite isn't valid. Check the code with your manager.")
     if status == 410:
         raise SystemExit("This invite was already used or expired. Ask your manager for a new one.")
     if status != 200:
@@ -339,16 +339,16 @@ def leave(cfg):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", nargs="?", default="poll", choices=("poll", "claim", "sync", "leave"))
-    ap.add_argument("link", nargs="?", help="invite link (claim only)")
+    ap.add_argument("code", nargs="?", help="invite code (claim only)")
     ap.add_argument("--verbose", action="store_true")
     a = ap.parse_args()
     for d in (YOLK_HOME, BRIEFS_DIR, REPORTS_DIR, OUTBOX_DIR, AUDIT_DIR):
         d.mkdir(parents=True, exist_ok=True)
     try:
         if a.action == "claim":
-            if not a.link:
-                ap.error("claim needs the invite link")
-            claim(a.link)
+            if not a.code:
+                ap.error("claim needs the invite code")
+            claim(a.code)
             return
         cfg = load_config()
         if a.action == "leave":
@@ -368,7 +368,7 @@ def main():
     except Unlinked:
         CONFIG_FILE.unlink(missing_ok=True)
         raise SystemExit("This Mac is no longer linked to Yolk (the server revoked its token). "
-                         "Run /yolk:setup with a new invite link from your manager.")
+                         "Run /yolk:setup with a new invite code from your manager.")
     except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
         raise SystemExit(f"Cannot reach the Yolk server ({e}). "
                          f"Unsent answers stay in {OUTBOX_DIR} and go out on the next poll.")

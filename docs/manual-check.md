@@ -1,181 +1,130 @@
 # Manual end-to-end check (local)
 
-This check runs the real plugin in your Claude Code against the real `yolk-plugin-server` on your
-Mac. Scenario ids (S1, S2, …) refer to `yolk-plugin-server/docs/device-behaviour.md`.
+The real plugin in Claude Code against the real `yolk-plugin-server` on this Mac. S-ids refer to
+`yolk-plugin-server/docs/device-behaviour.md`. Automated equivalent: `cd yolk-plugin-server && just test`.
 
-The automated version of the same scenarios uses a fake `claude` and a throwaway database:
-`cd yolk-plugin-server && just test`.
+**Cost.** Step 4 bills the Manager AI (Anthropic API). `/yolk:answer` reads your real local data
+for `$D`, for up to 25 minutes.
 
-**Cost and data.** Steps 6–8 call the Manager AI with your Anthropic API key (billed).
-`/yolk:answer` investigates your real local data for the chosen date, on your Claude
-subscription, for up to 25 minutes.
+## Prerequisites
 
-## 0. Prerequisites
-
-- Docker, `uv`, `just`, Python 3, and the Claude Code CLI with `claude` on PATH.
+- Docker, `uv`, `just`, Python 3, and `claude` on PATH.
 - `yolk-plugin-server` and `yolk-plugin-agent` side by side in `yolk-agentic/`.
-- `yolk-plugin-server/override.env` (not in git) with the Manager AI key:
-  ```
-  ANTHROPIC__API_KEY=sk-ant-...
-  ```
-  Optional: `CLAUDE__OAUTH_TOKEN=...` (the company claude.ai account for goals and the leave
-  lookup). Without it, the worker's `claude -p` keeps your `HOME`, so it most likely runs as
-  your own claude.ai login and reads company sources through your connectors.
-- Port 8080 is taken by yolk-backend's Keycloak on this Mac, so this check runs the API on **8081**.
+- `yolk-plugin-server/override.env` with `ANTHROPIC__API_KEY=sk-ant-...`. Optional:
+  `CLAUDE__OAUTH_TOKEN` (the company claude.ai account for goals and the leave lookup). Without it,
+  the worker's `claude -p` keeps your `HOME`, so it most likely runs as your own claude.ai login
+  and reads company sources through your connectors.
+- The API runs on 8081, because Keycloak holds 8080 on this Mac.
 
-## 1. Set the shell variables
-
-Run these in every terminal you use for this check:
+## 1. Variables (in every terminal)
 
 ```bash
-SERVER_DIR=~/Development/yolk/yolk-agentic/yolk-plugin-server
+S=~/Development/yolk/yolk-agentic/yolk-plugin-server
 Y=http://localhost:8081
 J='Content-Type: application/json'
-ADMIN="Authorization: Bearer $(cd $SERVER_DIR && just dev-admin-token 2>/dev/null | tail -1)"
-R=~/.claude/plugins/cache/yolk/yolk/1.3.0/scripts/employee_runner.py   # the installed plugin's runner
-D=$(date -v-1d +%F)                                                    # the date to check: yesterday
+ADMIN="Authorization: Bearer $(cd $S && just dev-admin-token 2>/dev/null | tail -1)"
+R=~/.claude/plugins/cache/yolk/yolk/1.3.0/scripts/employee_runner.py
+D=$(date -v-1d +%F)
 ```
 
-## 2. Start the API
+## 2. Server, plugin, employee
 
 ```bash
-cd $SERVER_DIR
-uv sync
-just services-start      # Postgres on localhost:54329
-just db-upgrade          # migrations
-PUBLIC_BASE_URL=$Y uv run uvicorn yolk_plugin_server.main:create_app --factory --port 8081
+cd $S && uv sync
+just services-start   # Postgres on localhost:54329
+just db-upgrade
+uv run uvicorn yolk_plugin_server.main:create_app --factory --port 8081   # terminal A, leave it running
+cd $S && just run-worker                                                                      # terminal B, leave it running
+curl -s $Y/api/health                                                                         # terminal C: {"status":"ok"}
 ```
 
-Leave it running. In a second terminal, check it: `curl -s $Y/api/health` prints `{"status":"ok"}`.
-
-## 3. Install the plugin
-
-Follow "From a local checkout" in the [README](../README.md#from-a-local-checkout-development).
-Then open a new Claude Code session.
-
-## 4. Create the employee
-
-```bash
-curl -s -X POST $Y/admin/employees -H "$ADMIN" -H "$J" -d '{
-  "id": "greg", "name": "Gregory", "role": "Backend engineer", "timezone": "Asia/Jerusalem",
-  "profile_md": "Name: Gregory\nRole: Backend engineer\nWhat real work looks like: reviewed, tested code; small PRs."}'
-```
-
-Expect `201` with `invite_url` = `http://localhost:8081/join/<CODE>`. A `409` means `greg`
-exists: get a new invite with `curl -s -X POST $Y/admin/employees/greg/invites -H "$ADMIN"`.
-
-## 5. Link the Mac (S1, S2, S3, S14)
-
-1. In Claude Code, run `/yolk:setup <invite_url>`. Accept the consent. Decline the background
-   poller for this check.
-2. Check the files: `ls -l ~/.claude/yolk/`. `agent.json` must be `-rw-------`, and `profile.md`
-   holds the profile from step 4.
-3. Check the server side: `curl -s $Y/admin/employees -H "$ADMIN"`. `greg` has device status
-   `active` and a `last_seen_at` (the heartbeat sent at setup).
-4. S3, the same invite again: `python3 $R claim <invite_url>` prints "already used or expired".
-5. S2, an unknown code: `python3 $R claim $Y/join/ZZZZ-9999` prints "isn't valid".
-6. Neither failed claim changes `~/.claude/yolk/agent.json`.
-
-## 6. Start the worker and queue the run
-
-1. In a new terminal: `cd $SERVER_DIR && just run-worker`. Leave it running.
-2. Queue a run for `$D`:
+1. Export `YOLK_SERVER=$Y`, then start Claude Code from that shell (the plugin has no other way to find
+   a local server). Install the plugin: [README → From a local checkout](../README.md#from-a-local-checkout-development).
+   Open a new Claude Code session.
+2. Create the employee and note `invite_code`:
    ```bash
-   curl -s -X POST $Y/admin/runs -H "$ADMIN" -H "$J" -d "{\"date\": \"$D\", \"employee_id\": \"greg\"}"
+   curl -s -X POST $Y/admin/employees -H "$ADMIN" -H "$J" \
+     -d '{"id":"greg","name":"Gregory","role":"Backend engineer","timezone":"Asia/Jerusalem","profile_md":"Name: Gregory\nRole: Backend engineer\nWhat real work looks like: reviewed, tested code; small PRs."}'
    ```
-   A `409` is fine. After 10:00 Asia/Jerusalem, the worker's daily task may already have
-   queued this run.
-3. Watch the state:
+   On `409`, get a new invite: `curl -s -X POST $Y/admin/employees/greg/invites -H "$ADMIN"`.
+
+## 3. Link (S1, S2, S3, S14)
+
+| Do | Expect |
+|---|---|
+| `/yolk:setup <invite_code>`, accept the consent, decline the poller | `~/.claude/yolk/agent.json` is `-rw-------`; `profile.md` holds the profile |
+| `curl -s $Y/admin/employees -H "$ADMIN"` | `greg`: `active`, `last_seen_at` set |
+| `YOLK_SERVER=$Y python3 $R claim <invite_code>` | "already used or expired" (S3); `agent.json` unchanged |
+| `YOLK_SERVER=$Y python3 $R claim ZZZZ-9999` | "isn't valid" (S2); `agent.json` unchanged |
+
+## 4. Run and answer (S5, S6, S10)
+
+1. Queue the run. A `409` means the run is already queued (e.g. by the daily task).
    ```bash
-   curl -s "$Y/admin/runs?date=$D" -H "$ADMIN" | python3 -m json.tool
+   curl -s -X POST $Y/admin/runs -H "$ADMIN" -H "$J" -d "{\"date\":\"$D\",\"employee_id\":\"greg\"}"
    ```
-   The order is `created` → `awaiting_r1` → (`following_up` → `awaiting_r2`) → `reporting` →
-   `published`. If it shows `failed`, read `failure_reason` and `failed_in`.
+2. Watch `curl -s "$Y/admin/runs?date=$D" -H "$ADMIN" | python3 -m json.tool`: `created` → `awaiting_r1` → (`following_up` → `awaiting_r2`) → `reporting` → `published`.
+   On `failed`, read `failure_reason` and `failed_in`.
+3. At `awaiting_r1`, and again at `awaiting_r2`, run `/yolk:answer`. Expect
+   `~/.claude/yolk/audit/<set id>.sent.json` and an empty `outbox/`. With nothing pending, it
+   says so (S5).
 
-## 7. Answer (S5, S6, S10)
+## 5. Brief and report (S13, S14)
 
-1. When the state is `awaiting_r1`, run `/yolk:answer` in Claude Code.
-2. Check: `ls ~/.claude/yolk/audit/` shows `<set id>.sent.json`, and `~/.claude/yolk/outbox/` is
-   empty.
-3. If the state moves to `awaiting_r2`, run `/yolk:answer` again (S10, round 2 with the
-   round-1 answers as `context`).
-4. When nothing is pending, `/yolk:answer` reports no pending questions (S5).
+When the run is `published`:
 
-## 8. Brief and report (S13, one report)
-
-1. When the state is `published`, run `/yolk:brief` and `/yolk:report`.
-2. Check that the report is exactly the manager's copy:
+1. Run `/yolk:brief` and `/yolk:report`.
+2. Check that the report is the manager's copy:
    ```bash
    curl -s $Y/admin/employees/greg/runs/$D -H "$ADMIN" \
      | python3 -c 'import json,sys; print(json.load(sys.stdin)["report_markdown"])' \
-     | diff - ~/.claude/yolk/reports/$D.md && echo "same report"
+     | diff - ~/.claude/yolk/reports/$D.md && echo same
    ```
+3. `last_seen_at` in `/admin/employees` moves forward after `/yolk:brief` (S14).
 
-## 9. Heartbeat (S14)
+## 6. Repeated post (S7)
 
-Note `last_seen_at` in `curl -s $Y/admin/employees -H "$ADMIN"`, run `/yolk:brief`, then check
-that `last_seen_at` is newer.
-
-## 10. Repeated post (S7)
-
-Do this only when nothing is pending, because this poll also investigates pending sets.
+Only with nothing pending, because this poll also investigates pending sets:
 
 ```bash
-cd ~/.claude/yolk && f=$(ls audit/*.sent.json | head -1) && cp "$f" "outbox/$(basename "$f" .sent.json).json"
-python3 $R
+cd ~/.claude/yolk && f=$(ls audit/*.sent.json | head -1) && cp "$f" "outbox/$(basename "$f" .sent.json).json" && python3 $R
 ```
 
-The log says "server already had them", and `outbox/` is empty again.
+Expect "server already had them" and an empty `outbox/`.
 
-## 11. Isolation (S9, S18)
+## 7. Isolation (S9, S18)
 
-1. Simulate a second Mac for a second employee, `ana`:
-   ```bash
-   LINK=$(curl -s -X POST $Y/admin/employees -H "$ADMIN" -H "$J" -d '{"id":"ana","name":"Ana","role":"PM","timezone":"Asia/Jerusalem","profile_md":"Name: Ana"}' \
-          | python3 -c 'import json,sys; print(json.load(sys.stdin)["invite_url"])')
-   YOLK_HOME=/tmp/yolk-ana python3 $R claim "$LINK"
-   ANA="Authorization: Bearer $(python3 -c 'import json; print(json.load(open("/tmp/yolk-ana/agent.json"))["device_token"])')"
-   ```
-2. Ana sees nothing of Greg's:
-   ```bash
-   curl -s $Y/v1/questions/pending -H "$ANA"    # {"question_sets":[]}
-   curl -s $Y/v1/briefs -H "$ANA"               # {"briefs":[]}
-   ```
-3. Ana cannot post to Greg's set. Take a set id from `ls ~/.claude/yolk/audit/*.sent.json`:
-   ```bash
-   curl -s -o /dev/null -w '%{http_code}\n' -X POST $Y/v1/questions/<greg set id>/answers -H "$ANA" -H "$J" \
-     -d "{\"employee_id\":\"ana\",\"date\":\"$D\",\"round\":1,\"timezone\":\"Asia/Jerusalem\",\"generated_at\":\"${D}T12:00:00+03:00\",\"answers\":{\"answers\":[]}}"
-   ```
-   Expect `404`.
-4. Clean up: `curl -s -X DELETE $Y/admin/employees/ana/device -H "$ADMIN"` and
-   `rm -rf /tmp/yolk-ana`.
+```bash
+L=$(curl -s -X POST $Y/admin/employees -H "$ADMIN" -H "$J" \
+  -d '{"id":"ana","name":"Ana","role":"PM","timezone":"Asia/Jerusalem","profile_md":"Name: Ana"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["invite_code"])')
+YOLK_SERVER=$Y YOLK_HOME=/tmp/yolk-ana python3 $R claim "$L"
+ANA="Authorization: Bearer $(python3 -c 'import json; print(json.load(open("/tmp/yolk-ana/agent.json"))["device_token"])')"
+SET=$(basename "$(ls ~/.claude/yolk/audit/*.sent.json | head -1)" .sent.json)
 
-## 12. Revoke (S16)
+curl -s $Y/v1/questions/pending -H "$ANA"    # {"question_sets":[]}
+curl -s $Y/v1/briefs -H "$ANA"               # {"briefs":[]}
+curl -s -o /dev/null -w '%{http_code}\n' -X POST $Y/v1/questions/$SET/answers -H "$ANA" -H "$J" \
+  -d "{\"employee_id\":\"ana\",\"date\":\"$D\",\"round\":1,\"timezone\":\"Asia/Jerusalem\",\"generated_at\":\"${D}T12:00:00+03:00\",\"answers\":{\"answers\":[]}}"   # 404
 
-1. `curl -s -o /dev/null -w '%{http_code}\n' -X DELETE $Y/admin/employees/greg/device -H "$ADMIN"` prints `204`.
-2. Run `/yolk:brief`. It reports that this Mac is no longer linked and tells you to run
-   `/yolk:setup` again.
-3. `~/.claude/yolk/agent.json` is gone. The briefs, reports and audit trail stay.
+curl -s -X DELETE $Y/admin/employees/ana/device -H "$ADMIN"; rm -rf /tmp/yolk-ana
+```
 
-## 13. Leave (S15)
+## 8. Revoke and leave (S15, S16)
 
-1. Get a new invite: `curl -s -X POST $Y/admin/employees/greg/invites -H "$ADMIN"`.
-2. Run `/yolk:setup <invite_url>`, then `/yolk:leave`.
-3. `~/.claude/yolk/agent.json` is gone, and `curl -s $Y/admin/employees -H "$ADMIN"` shows
-   `greg` with device status `revoked`.
+| Do | Expect |
+|---|---|
+| `curl -s -o /dev/null -w '%{http_code}\n' -X DELETE $Y/admin/employees/greg/device -H "$ADMIN"` prints `204`, then `/yolk:brief` | "no longer linked"; `agent.json` gone; briefs, reports and audit kept (S16) |
+| New invite (`curl -s -X POST $Y/admin/employees/greg/invites -H "$ADMIN"`), `/yolk:setup <invite_code>`, then `/yolk:leave` | `agent.json` gone; `greg` device `revoked` (S15) |
 
-## 14. Clean up
+## 9. Clean up
 
-1. Stop the API and the worker (Ctrl-C).
-2. Optional: `cd $SERVER_DIR && just services-cleanup`. This deletes the local database.
-3. Optional: `rm -rf ~/.claude/yolk`.
+Stop the API and the worker with Ctrl-C. Optional: `cd $S && just services-cleanup` (drops the
+local database) and `rm -rf ~/.claude/yolk`.
 
 ## Known limits
 
-- **D5.** A brief for a date older than your newest local brief never arrives. If you check
-  several dates, queue them oldest first.
-- A bare invite code goes to `http://localhost:8080`, which is Keycloak on this Mac. Use the
-  full link, or start Claude Code with `YOLK_SERVER=http://localhost:8081`.
-- The server's `/join/<CODE>` page lists `/plugin install yolk@yolk` but not the
-  `/plugin marketplace add` step that must come first.
-- `R` points at the installed version `1.3.0`. Update the path after a version bump.
+- **D5.** A brief for a date older than your newest local brief never arrives. Check dates
+  oldest first.
+- The invite code carries no server address; without `YOLK_SERVER` the plugin uses `http://localhost:8080` (Keycloak here).
+- `R` is pinned to plugin version 1.3.0.
