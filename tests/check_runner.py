@@ -464,10 +464,11 @@ def check_heal_schedule():
     r.INSTALLED_PLUGINS_DIR = tmp / "plugins"           # pretend this copy is the installed plugin
     r.PLUGIN_ROOT = r.INSTALLED_PLUGINS_DIR / "cache" / "yolk"
 
-    def plist(*args, home=None):
+    def plist(*args, home=None, schedule=None):
         r.LAUNCH_PLIST.write_bytes(plistlib.dumps({
             "Label": "com.yolk.agent", "ProgramArguments": list(args),
-            "EnvironmentVariables": {"YOLK_HOME": home or str(r.YOLK_HOME)}}))
+            "EnvironmentVariables": {"YOLK_HOME": home or str(r.YOLK_HOME)},
+            **(schedule if schedule is not None else {"StartCalendarInterval": [{"Minute": m} for m in (0, 20, 40)]})}))
 
     xpc = os.environ.pop("XPC_SERVICE_NAME", None)
     try:
@@ -491,6 +492,22 @@ def check_heal_schedule():
         assert len(calls) == 1 and "outdated launcher" in agent_log()
         calls.clear()
         launcher.write_bytes((r.HERE / "launcher.py").read_bytes())
+        before = agent_log()
+        # a 1.6.3 plist (launcher path + StartInterval) migrates to the calendar schedule
+        n0 = len(calls)
+        plist("/usr/bin/python3", str(launcher), schedule={"StartInterval": 1200})
+        r.heal_schedule()
+        assert len(calls) == n0 + 1 and "used the old schedule" in agent_log()
+        plist("/usr/bin/python3", str(launcher), schedule={"StartInterval": 1200, "StartCalendarInterval": [{"Minute": 0}]})
+        r.heal_schedule()
+        assert len(calls) == n0 + 2                                           # both keys: still old
+        plist("/usr/bin/python3", str(launcher), schedule={})
+        r.heal_schedule()
+        assert len(calls) == n0 + 3                                           # neither key
+        plist("/usr/bin/python3", str(launcher))
+        r.heal_schedule()
+        assert len(calls) == n0 + 3                                           # current: untouched
+        calls[:] = calls[:n0]
         before = agent_log()
         # a version-pinned plist (1.3 - 1.6.0) migrates to the launcher
         plist("/usr/bin/python3", "/old/cache/yolk/yolk/1.3.1/scripts/employee_runner.py")  # stale
@@ -721,10 +738,24 @@ def check_install_script_plist():
     (stub / "launchctl").write_text("#!/bin/sh\necho \"$@\" >> \"$HOME/launchctl.log\"\n")
     (stub / "launchctl").chmod(0o755)
     env = {"HOME": str(home), "PATH": f"{stub}:/usr/bin:/bin:{Path(sys.executable).parent}", "YOLK_HOME": str(home / ".claude" / "yolk")}
-    p = subprocess.run(["bash", str(r.HERE / "install_schedule.sh")], env=env, capture_output=True, text=True, timeout=60)
-    assert p.returncode == 0, p.stderr
-    plist = plistlib.loads((home / "Library" / "LaunchAgents" / "com.yolk.agent.plist").read_bytes())
-    assert plist["RunAtLoad"] is True and plist["StartInterval"] == 1200 and plist["Label"] == "com.yolk.agent"
+
+    def install(interval=None):
+        agent = home / ".claude" / "yolk" / "agent.json"
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_text(json.dumps({} if interval is None else {"poll_interval_s": interval}))
+        p = subprocess.run(["bash", str(r.HERE / "install_schedule.sh")], env=env, capture_output=True, text=True, timeout=60)
+        assert p.returncode == 0, p.stderr
+        return plistlib.loads((home / "Library" / "LaunchAgents" / "com.yolk.agent.plist").read_bytes())
+
+    def minutes(plist):
+        return [d["Minute"] for d in plist["StartCalendarInterval"]]
+    plist = install()
+    assert minutes(plist) == [0, 20, 40] and "StartInterval" not in plist         # wake-proof calendar schedule
+    assert install(600)["StartCalendarInterval"] and minutes(install(600)) == [0, 10, 20, 30, 40, 50]
+    assert minutes(install(3600)) == [0] and minutes(install(7200)) == [0]       # an hour or more: hourly
+    assert minutes(install(1500)) == [0] and minutes(install(45)) == [0]         # not a divisor of 3600: hourly
+    plist = install()
+    assert plist["RunAtLoad"] is True and plist["Label"] == "com.yolk.agent"
     assert plist["EnvironmentVariables"]["YOLK_HOME"] == env["YOLK_HOME"]
     launcher = home / ".claude" / "yolk" / "bin" / "launcher.py"
     assert plist["ProgramArguments"][1] == str(launcher)            # the plist runs the stable launcher
@@ -914,7 +945,8 @@ def check_heal_action_and_hook():
 
     def plist(*args):
         r.LAUNCH_PLIST.write_bytes(plistlib.dumps({"ProgramArguments": list(args),
-                                                   "EnvironmentVariables": {"YOLK_HOME": str(r.YOLK_HOME)}}))
+                                                   "EnvironmentVariables": {"YOLK_HOME": str(r.YOLK_HOME)},
+                                                   "StartCalendarInterval": [{"Minute": m} for m in (0, 20, 40)]}))
     try:
         r.CONFIG_FILE.unlink(missing_ok=True)
         assert heal() == [] and not calls                                  # not linked: silent, nothing installed

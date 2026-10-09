@@ -634,9 +634,11 @@ def heal_schedule():
         current = installed.read_bytes() == (HERE / "launcher.py").read_bytes()
     except OSError:
         current = False
-    if points_at_launcher and current:
+    on_calendar = "StartCalendarInterval" in plist and "StartInterval" not in plist  # StartInterval misses firings during sleep
+    if points_at_launcher and current and on_calendar:
         return
-    log("The background poller " + ("ran an outdated launcher" if points_at_launcher else "did not use the launcher")
+    log("The background poller " + (("ran an outdated launcher" if not current else "used the old schedule")
+                                    if points_at_launcher else "did not use the launcher")
         + "; " + ("updated it." if install_schedule() else "could not update it (run scripts/install_schedule.sh)."))
 
 

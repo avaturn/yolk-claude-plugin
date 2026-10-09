@@ -73,7 +73,7 @@ background poller runs it). Check with `claude --version`.
 
 | Command | What it does |
 |---|---|
-| `/yolk:setup <code>` | Consent, link this Mac with the invite, install the background poller (starts at once, at every login, and every 20 min) |
+| `/yolk:setup <code>` | Consent, link this Mac with the invite, install the background poller (starts at once, at login, right after wake, and every 20 min) |
 | `/yolk:brief [date]` | Your coach brief; if none has arrived yet it says what the poller is doing and tells you when it is ready |
 | `/yolk:report [date]` | Your own daily activity report (the local summary of a day) |
 | `/yolk:leave` | Revoke this Mac's token and stop the poller |
@@ -89,7 +89,7 @@ Yolk server ◀──sanitized answers──┘
 Yolk server ──coach brief──▶ ~/.claude/yolk/briefs
 ```
 
-The poller runs at load, at every login and every 20 minutes; each run sends unsent answers, fetches briefs, then for each question set builds that
+The poller runs at load, at every login, right after the Mac wakes and every 20 minutes (launchd calendar schedule: minutes 0/20/40); each run sends unsent answers, fetches briefs, then for each question set builds that
 day's summary if missing and answers it. Only after the answers are out does it fill in the local summary
 of other finished days (up to 2 per poll) from 7 days ago to yesterday. A day whose summary fails to build 3 times is
 given up on (`audit/summary-<date>.failed.json`, local). A day is summarized only after it has ended in
