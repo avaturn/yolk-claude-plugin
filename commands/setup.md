@@ -3,36 +3,19 @@ description: This plugin coaches you to reach the team goal in the most efficien
 argument-hint: "<invite code from your manager, e.g. K7QP-3FXA>"
 ---
 
-Set up the Yolk Employee Agent on this Mac. This is the ONE approval moment — after this, a background job answers the manager's check-ins without nagging.
+Set up Yolk on this Mac. This is the one approval moment.
 
-1. **Explain what the user is approving** (be transparent — this answers work-monitoring questions from their manager's AI):
-   - A local agent will read Claude Code session history (`~/.claude/projects`), macOS Screen Time stats, browsing history from every Chromium-family browser it finds (Chrome, Arc, Brave, Edge, Chromium, Vivaldi: domains, page titles, timing — used to reconstruct the workday), local git activity, and any cloud connectors already configured.
-   - **Raw activity data and daily summaries are never sent to Yolk or the manager; they are processed by Claude under the user's own account.** The agent reads those sources, has Claude (the user's own Claude Code subscription) turn each finished workday into a private summary (what, where, how), and keeps it in `~/.claude/yolk/days/`. It uses that summary to answer the questions the Manager AI posts about the user's day.
-   - **Only sanitized answers to the Manager AI's questions leave this Mac**, over HTTPS to the Yolk server, at business level (meeting subjects, doc titles, client names) — never raw code, prompts, shell commands, chats, email/message bodies, URLs, the raw browsing history, or secrets. Personal activity is reported only in aggregate. A deterministic sanitizer enforces this on top of the agent's rules, and every answer sent is kept in `~/.claude/yolk/audit/` (`<id>.sent.json`). The raw data in `days/` is private to this user and deleted after 14 days.
-   - This plugin contains NO manager logic and needs NO API key — summaries and investigations run on the user's own Claude subscription (Claude Opus 5.5). The manager sees the user's sanitized answers and a team digest (the user never sees the digest). The user sees their own daily activity report — the local summary, with `/yolk:report` — and a coach brief built from their answers, with `/yolk:brief`. Their device token can only ever read their own questions and briefs.
-   - **A background job runs on this Mac** (launchd: at every login and every 20 minutes while the Mac is awake) to do all of the above. `/yolk:leave` removes it.
-   - Ask for explicit confirmation before continuing.
-
-2. **Invite**: use `$ARGUMENTS` if present (the code, like `K7QP-3FXA`; case and dashes do not matter), otherwise ask for the invite code their manager sent. If it is a link, ask for the code instead.
-
-3. **Link this Mac**:
-   ```
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/employee_runner.py" claim "<invite code>"
-   ```
-   The script stores the device token itself. Never read, print, or `cat` `~/.claude/yolk/agent.json` — the token must not enter this conversation's transcript. If the script says the invite "isn't valid" or was "already used or expired", tell the user to ask their manager for a new invite and stop.
-
-4. **Show the profile** from `~/.claude/yolk/profile.md`. Tell the user the Manager AI calibrates every judgment against it, and that their manager fixes it if it's wrong.
-
-5. **Verify prerequisites**: `python3 --version` and `claude --version`. The summaries and the investigations run the `claude` CLI; if it's missing, help them install Claude Code CLI before step 7.
-
-6. **Full Disk Access (Screen Time)**: macOS lets only programs with Full Disk Access read Screen Time stats; everything else degrades gracefully without it, and a summary notes which source could not be read. Two different programs need it (System Settings → Privacy & Security → Full Disk Access, the "+" button, then Cmd+Shift+G to type a path):
-   - the terminal (or the Claude Code app) this session runs in — it covers the foreground commands you run;
-   - **the `python3` binary the background poller runs as.** launchd starts that binary directly, not the terminal, so the terminal's permission does not carry over. Get its path with `python3 -c 'import os,sys; print(os.path.realpath(sys.executable))'` and show the user that exact path.
-
-7. **Install the background poller** (not optional — it is how the agent works): `bash "${CLAUDE_PLUGIN_ROOT}/scripts/install_schedule.sh"`, and repeat the `python3` path it prints for Full Disk Access. It starts at once, and again at every login and every 20 minutes while the Mac is awake. That first poll builds yesterday's local activity report and answers the check-in the server may have started when the Mac was linked.
-
-8. **Turn on auto-update, once**: tell the user to open `/plugin` → Marketplaces → `yolk` → Enable auto-update, so new versions of this plugin arrive by themselves (the background poller follows the newest installed version). They can skip it when their organization manages updates (the toggle is then hidden or refused).
-
-9. Right after installing the poller, run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/employee_runner.py" status --wait 1800` with the Bash tool's `run_in_background` and do not poll its output. Tell the user the session will report when their first activity report (and their brief, if a check-in opens) is ready; when it finishes, point to `/yolk:report <date>` for each date in `reports_ready` and show the brief with `/yolk:brief` if one arrived.
-
-10. Tell the user: the coach brief usually arrives within about 20-40 minutes (read it with `/yolk:brief`); their own daily activity report is `/yolk:report`. Progress is in `~/.claude/yolk/audit/agent.log` and `~/.claude/yolk/audit/poller.log`. If a source shows `error` in the log (usually Screen Time without Full Disk Access), say which one. The agent fills in the rest of the last 7 days over the next polls. `/yolk:leave` unlinks this Mac and stops the poller.
+1. **Say what the user approves, then ask for explicit confirmation:**
+   - Yolk reads Claude Code sessions (`~/.claude/projects`), Screen Time, git, any cloud connectors already set up, and browser history (domains, page titles, timing) from Chrome, Arc, Brave, Edge, Chromium and Vivaldi.
+   - **Only sanitized answers to the server's daily question leave this Mac**, over HTTPS, at business level (meeting subjects, document titles, client names). Code, prompts, commands, messages, URLs and secrets are filtered out; personal activity is reported only as a total. Every answer sent is kept in `~/.claude/yolk/audit/`.
+   - **Raw activity data and daily reports stay on this Mac.** They are never sent to Yolk or the manager; Claude processes them under the user's own account (Opus 5.5, no API key). Raw data is deleted after 14 days.
+   - The manager sees the sanitized answers and a team digest (the user never sees the digest). The user sees their own daily report (`/yolk:report`) and a coach brief built from their answers (`/yolk:brief`).
+   - A background job runs on this Mac at every login, right after the Mac wakes, and every 20 minutes. `/yolk:leave` removes it.
+2. **Invite code:** use `$ARGUMENTS`, else ask for the code the manager sent (not a link).
+3. **Link:** `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/employee_runner.py" claim "<invite code>"`. Never read, print or `cat` `~/.claude/yolk/agent.json` (it holds the device token). If the invite is "not valid" or "already used or expired", tell the user to ask their manager for a new one and stop.
+4. **Show `~/.claude/yolk/profile.md`:** the Manager AI calibrates to it; the manager fixes it if it is wrong.
+5. **Check `python3 --version` and `claude --version`;** help install the Claude Code CLI if it is missing.
+6. **Full Disk Access (for Screen Time; the rest works without it):** System Settings → Privacy & Security → Full Disk Access → "+" (Cmd+Shift+G to type a path), for the terminal or Claude Code app, and for the `python3` the background job runs as. Show its path: `python3 -c 'import os,sys; print(os.path.realpath(sys.executable))'`.
+7. **Start the background job:** `bash "${CLAUDE_PLUGIN_ROOT}/scripts/install_schedule.sh"`. It starts at once; the first run builds yesterday's report and answers the check-in the server may have opened.
+8. **Auto-update, once:** `/plugin` → Marketplaces → `yolk` → Enable auto-update (skip if the organization manages it).
+9. Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/employee_runner.py" status --wait 1800` with the Bash tool's `run_in_background`; do not poll it. Tell the user the session will say when the first report (and the brief, usually within 20-40 minutes) is ready; then point to `/yolk:report <date>` for each date in `reports_ready`, and `/yolk:brief` if a brief arrived. Progress: `~/.claude/yolk/audit/agent.log`.

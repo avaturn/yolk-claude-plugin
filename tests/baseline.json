@@ -1,0 +1,439 @@
+{
+ "exits": {
+  "unlinked": {
+   "agent_json_deleted": true,
+   "exit": 1,
+   "stderr": "This Mac is no longer linked to Yolk (the server revoked its token). Run /yolk:setup with a new invite code from your manager."
+  },
+  "unreachable": {
+   "agent_json_kept": true,
+   "exit": 1,
+   "stderr_prefix": "Cannot reach the Yolk server (<urlopen e"
+  }
+ },
+ "poll": {
+  "claude_flags": [
+   [
+    true,
+    "--output-format",
+    "--verbose",
+    "--no-session-persistence",
+    "--model",
+    "--effort",
+    "--tools",
+    "--strict-mcp-config",
+    "--session-id",
+    "--max-turns"
+   ],
+   [
+    false,
+    "--output-format",
+    "--verbose",
+    "--no-session-persistence",
+    "--model",
+    "--effort",
+    "--dangerously-skip-permissions",
+    "--session-id",
+    "--max-turns"
+   ]
+  ],
+  "exit": 0,
+  "log": [
+   "[yolk T] Received 1 brief(s).",
+   "[yolk T] Summarizer run for D-1 took N s.",
+   "[yolk T] Summarized D-1: claude_sessions=empty screen_time=error git=empty browser=ok; 1 block(s), 1 work item(s)",
+   "[yolk T] Investigating D-1 round 1 (qs_base) \u2026",
+   "[yolk T] Answered qs_base",
+   "[yolk T] Sent answers for qs_base",
+   "[yolk T] Summarized D-2: claude_sessions=empty screen_time=error git=empty browser=empty; 0 block(s), 0 work item(s)",
+   "[yolk T] Summarized D-3: claude_sessions=empty screen_time=error git=empty browser=empty; 0 block(s), 0 work item(s)",
+   "[yolk T] Done \u2014 1 question set(s) answered."
+  ],
+  "prompt_hashes": {
+   "investigator": "942c7fbb6c630acd767c434b90f129d4ca5a448ba2ce4d58c68307b824dc4e6e",
+   "summarizer": "5c255126e0628cbbf6d35cf1d30ff723b64539d63a84d24e3cf45b0c702349df"
+  },
+  "requests": [
+   [
+    "GET",
+    "/v1/briefs",
+    null,
+    true
+   ],
+   [
+    "POST",
+    "/v1/devices/heartbeat",
+    {
+     "agent_version": null,
+     "error": null,
+     "last_answered_at": null,
+     "latest_brief": null,
+     "status": null
+    },
+    true
+   ],
+   [
+    "GET",
+    "/v1/questions/pending",
+    null,
+    true
+   ],
+   [
+    "POST",
+    "/v1/questions/qs_base/answers",
+    {
+     "agent_version": null,
+     "answers": {
+      "answers": [
+       {
+        "answer": null,
+        "confidence": null,
+        "evidence": null,
+        "question_id": null
+       }
+      ],
+      "volunteered_context": null
+     },
+     "date": null,
+     "employee_id": null,
+     "generated_at": null,
+     "privacy_redactions": [],
+     "round": null,
+     "timezone": null
+    },
+    true
+   ],
+   [
+    "POST",
+    "/v1/devices/heartbeat",
+    {
+     "agent_version": null,
+     "error": null,
+     "last_answered_at": null,
+     "latest_brief": null,
+     "status": null
+    },
+    true
+   ]
+  ],
+  "tree": {
+   ".lock": {
+    "kind": "text",
+    "mode": "0o644"
+   },
+   "agent.json": {
+    "keys": {
+     "device_token": null,
+     "employee_id": null,
+     "name": null,
+     "poll_interval_s": null,
+     "server": null,
+     "timezone": null
+    },
+    "mode": "0o644"
+   },
+   "audit": {
+    "kind": "dir",
+    "mode": "0o755"
+   },
+   "audit/agent.log": {
+    "kind": "text",
+    "mode": "0o644"
+   },
+   "audit/qs_base.raw.json": {
+    "keys": {
+     "answers": [
+      {
+       "answer": null,
+       "confidence": null,
+       "evidence": null,
+       "question_id": null
+      }
+     ]
+    },
+    "mode": "0o644"
+   },
+   "audit/qs_base.sent.json": {
+    "keys": {
+     "agent_version": null,
+     "answers": {
+      "answers": [
+       {
+        "answer": null,
+        "confidence": null,
+        "evidence": null,
+        "question_id": null
+       }
+      ],
+      "volunteered_context": null
+     },
+     "date": null,
+     "employee_id": null,
+     "generated_at": null,
+     "privacy_redactions": [],
+     "round": null,
+     "timezone": null
+    },
+    "mode": "0o600"
+   },
+   "briefs": {
+    "kind": "dir",
+    "mode": "0o755"
+   },
+   "briefs/D-1.json": {
+    "keys": {
+     "summary": null,
+     "version": null
+    },
+    "mode": "0o644"
+   },
+   "days": {
+    "kind": "dir",
+    "mode": "0o700"
+   },
+   "days/D-1.json": {
+    "keys": {
+     "data": {
+      "browser": {
+       "active_blocks": [
+        null
+       ],
+       "active_browsing_minutes": null,
+       "date": null,
+       "title_timeline": [
+        {
+         "browser": null,
+         "domain": null,
+         "time": null,
+         "title": null
+        }
+       ],
+       "top_domains": {
+        "example.com": null
+       },
+       "total_visits": null,
+       "visits_per_browser": {
+        "Chrome": null
+       },
+       "visits_per_hour": {
+        "10": null
+       }
+      },
+      "claude_sessions": {
+       "active_blocks": [],
+       "active_claude_minutes": null,
+       "active_hours_formatted": null,
+       "date": null,
+       "projects": {},
+       "total_user_prompts": null
+      },
+      "git": {
+       "date": null,
+       "repos_with_activity": []
+      },
+      "screen_time": {
+       "date": null,
+       "error": null
+      }
+     },
+     "date": null,
+     "sources": {
+      "browser": null,
+      "claude_sessions": null,
+      "git": null,
+      "screen_time": null
+     },
+     "timezone": null
+    },
+    "mode": "0o600"
+   },
+   "days/D-1.summary.json": {
+    "keys": {
+     "agent_version": null,
+     "generated_at": null,
+     "privacy_redactions": [],
+     "sources": {
+      "browser": null,
+      "claude_sessions": null,
+      "git": null,
+      "screen_time": null
+     },
+     "summary": {
+      "active_minutes": null,
+      "blocks": [
+       {
+        "confidence": null,
+        "end": null,
+        "how": null,
+        "kind": null,
+        "start": null,
+        "what": null,
+        "where": null
+       }
+      ],
+      "overview": null,
+      "personal_minutes": null,
+      "work_items": [
+       {
+        "evidence": null,
+        "outcome": null,
+        "title": null
+       }
+      ]
+     },
+     "timezone": null
+    },
+    "mode": "0o600"
+   },
+   "days/D-2.json": {
+    "keys": {
+     "data": {
+      "browser": {
+       "active_blocks": [],
+       "active_browsing_minutes": null,
+       "date": null,
+       "title_timeline": [],
+       "top_domains": {},
+       "total_visits": null,
+       "visits_per_browser": {},
+       "visits_per_hour": {}
+      },
+      "claude_sessions": {
+       "active_blocks": [],
+       "active_claude_minutes": null,
+       "active_hours_formatted": null,
+       "date": null,
+       "projects": {},
+       "total_user_prompts": null
+      },
+      "git": {
+       "date": null,
+       "repos_with_activity": []
+      },
+      "screen_time": {
+       "date": null,
+       "error": null
+      }
+     },
+     "date": null,
+     "sources": {
+      "browser": null,
+      "claude_sessions": null,
+      "git": null,
+      "screen_time": null
+     },
+     "timezone": null
+    },
+    "mode": "0o600"
+   },
+   "days/D-2.summary.json": {
+    "keys": {
+     "agent_version": null,
+     "generated_at": null,
+     "privacy_redactions": [],
+     "sources": {
+      "browser": null,
+      "claude_sessions": null,
+      "git": null,
+      "screen_time": null
+     },
+     "summary": {
+      "active_minutes": null,
+      "blocks": [],
+      "overview": null,
+      "personal_minutes": null,
+      "work_items": []
+     },
+     "timezone": null
+    },
+    "mode": "0o600"
+   },
+   "days/D-3.json": {
+    "keys": {
+     "data": {
+      "browser": {
+       "active_blocks": [],
+       "active_browsing_minutes": null,
+       "date": null,
+       "title_timeline": [],
+       "top_domains": {},
+       "total_visits": null,
+       "visits_per_browser": {},
+       "visits_per_hour": {}
+      },
+      "claude_sessions": {
+       "active_blocks": [],
+       "active_claude_minutes": null,
+       "active_hours_formatted": null,
+       "date": null,
+       "projects": {},
+       "total_user_prompts": null
+      },
+      "git": {
+       "date": null,
+       "repos_with_activity": []
+      },
+      "screen_time": {
+       "date": null,
+       "error": null
+      }
+     },
+     "date": null,
+     "sources": {
+      "browser": null,
+      "claude_sessions": null,
+      "git": null,
+      "screen_time": null
+     },
+     "timezone": null
+    },
+    "mode": "0o600"
+   },
+   "days/D-3.summary.json": {
+    "keys": {
+     "agent_version": null,
+     "generated_at": null,
+     "privacy_redactions": [],
+     "sources": {
+      "browser": null,
+      "claude_sessions": null,
+      "git": null,
+      "screen_time": null
+     },
+     "summary": {
+      "active_minutes": null,
+      "blocks": [],
+      "overview": null,
+      "personal_minutes": null,
+      "work_items": []
+     },
+     "timezone": null
+    },
+    "mode": "0o600"
+   },
+   "outbox": {
+    "kind": "dir",
+    "mode": "0o755"
+   },
+   "profile.md": {
+    "kind": "text",
+    "mode": "0o644"
+   },
+   "status.json": {
+    "keys": {
+     "answered": {
+      "D-1": null
+     },
+     "date": null,
+     "last_error": null,
+     "last_poll_ended": null,
+     "last_poll_started": null,
+     "open_check_ins": [],
+     "phase": null,
+     "since": null
+    },
+    "mode": "0o600"
+   }
+  }
+ }
+}

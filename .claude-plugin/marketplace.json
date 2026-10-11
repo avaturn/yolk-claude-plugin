@@ -9,7 +9,7 @@
     {
       "name": "yolk",
       "source": "./",
-      "description": "Yolk employee agent: answers the Manager AI's daily check-in with sanitized answers; shows your report and coach brief. No manager logic on this Mac."
+      "description": "Answers your daily Yolk check-in from your own activity data; shows your daily report and coach brief."
     }
   ]
 }

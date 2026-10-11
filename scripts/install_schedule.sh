@@ -1,6 +1,6 @@
 #!/bin/bash
-# Install the Yolk Employee Agent background poller (launchd, at load/login and every poll_interval_s
-# from ~/.claude/yolk/agent.json, default 20 min).
+# Install the Yolk Employee Agent background poller (launchd: at load/login, after wake, and every
+# poll_interval_s from ~/.claude/yolk/agent.json, default 20 min).
 set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,6 +17,15 @@ CLAUDE_BIN="$(command -v claude || true)"
 PY_BIN="$(command -v python3)"
 INTERVAL="$("$PY_BIN" -c 'import json,sys; print(int(json.load(open(sys.argv[1])).get("poll_interval_s", 1200)))' \
   "$YOLK_HOME/agent.json" 2>/dev/null || echo 1200)"
+
+# StartCalendarInterval, not StartInterval: launchd misses StartInterval firings while the Mac sleeps
+# (man launchd.plist), so the first poll after a wake could come up to one interval late; a calendar job
+# missed during sleep runs once, when the Mac wakes. Minutes: every INTERVAL/60 within the hour (0/20/40
+# by default). An interval of an hour or more, or one that does not divide 3600 evenly, falls back to
+# hourly at minute 0.
+MINUTES="$("$PY_BIN" -c 'import sys; i = int(sys.argv[1]); print(" ".join(str(m) for m in range(0, 60, i // 60)) if 60 <= i < 3600 and 3600 % i == 0 else "0")' "$INTERVAL")"
+SCHEDULE=""
+for m in $MINUTES; do SCHEDULE="$SCHEDULE<dict><key>Minute</key><integer>$m</integer></dict>"; done
 
 if [ -f "$OLD_PLIST" ]; then
   launchctl unload "$OLD_PLIST" 2>/dev/null || true
@@ -41,7 +50,7 @@ cat > "$PLIST" <<EOF
     <key>YOLK_HOME</key><string>${YOLK_HOME}</string>
   </dict>
   <key>RunAtLoad</key><true/>
-  <key>StartInterval</key><integer>${INTERVAL}</integer>
+  <key>StartCalendarInterval</key><array>${SCHEDULE}</array>
   <key>StandardOutPath</key><string>${LOG_DIR}/poller.log</string>
   <key>StandardErrorPath</key><string>${LOG_DIR}/poller.err</string>
 </dict>
@@ -50,7 +59,7 @@ EOF
 
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
-echo "Installed: com.yolk.agent (polls every $((INTERVAL / 60)) min). Logs: $LOG_DIR"
+echo "Installed: com.yolk.agent (polls at login, after wake, and at minute(s) ${MINUTES// /,} of every hour). Logs: $LOG_DIR"
 # launchd runs python3 itself, not your terminal: Screen Time needs Full Disk Access for THIS binary
 echo "Full Disk Access (System Settings > Privacy & Security): add $("$PY_BIN" -c 'import os,sys; print(os.path.realpath(sys.executable))')"
 [ -n "$CLAUDE_BIN" ] || echo "WARNING: 'claude' CLI not found on PATH — investigations will fail until it is installed."
