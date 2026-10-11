@@ -4,6 +4,7 @@
   2. send answers saved by an earlier run
   3. fetch briefs, heartbeat   (cheap calls first: a 25-minute investigation must not delay them)
   4. prune old raw day files
+  4b. manager role with context_consent only: collect and post the context of the pending dates
   5. fetch the pending question sets; answer each (its day's report first)
   6. only now fill in the reports of the other missing days, BACKFILL_PER_POLL at a time
   7. heartbeat again if there was anything to report
@@ -14,7 +15,7 @@ import json
 import shutil
 from datetime import datetime
 
-from . import VERSION, activity, api, checkin, config, schedule, store
+from . import VERSION, activity, api, checkin, config, manager, schedule, store
 
 
 def sync_briefs(cfg):
@@ -31,7 +32,7 @@ def sync_briefs(cfg):
 
 def heartbeat(cfg, status="ok", error=None):
     # 1.4.0 left summary-*.sent.json behind: only answers count as "last answered"
-    sent = max((p for p in config.AUDIT_DIR.glob("*.sent.json") if not p.name.startswith("summary-")),
+    sent = max((p for p in config.AUDIT_DIR.glob("*.sent.json") if not p.name.startswith(("summary-", "context-"))),
                key=lambda p: p.stat().st_mtime, default=None)
     api.heartbeat(cfg, {
         "agent_version": VERSION, "status": status, "error": error,
@@ -51,7 +52,9 @@ def poll_once(cfg, verbose):
         shutil.rmtree(config.OUTBOX_DIR / "summaries", ignore_errors=True)  # 1.4.0 queued summaries; never sent now
         profile = config.load_profile()
         today = config.summary_today(cfg)
-        error, tried = None, set()
+        # manager role: context unblocks the whole team, so it goes before this person's own answers
+        error = manager.context_step(cfg, verbose) if cfg.get("role") == "manager" and cfg.get("context_consent") else None
+        tried = set()
         sets = api.pending(cfg)
         store.set_status(open_check_ins=sorted({str(q.get("date")) for q in sets}))
         if not sets:

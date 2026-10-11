@@ -2,7 +2,8 @@
 
 Runs on the employee's device. It answers the server's daily check-in with sanitized text and builds
 the employee's own daily activity report locally; raw activity data and reports never leave the
-device. No manager logic and no API keys live here.
+device. A plugin claimed with a manager invite code also collects company context (manager.py)
+with the manager's own read-only connectors. No API keys live here.
 
 Modules, from the bottom up (no module imports one below it in this list):
   config    paths, limits, the clock, agent.json and profile
@@ -12,6 +13,7 @@ Modules, from the bottom up (no module imports one below it in this list):
   privacy   the privacy gate and the shape of what is stored or sent
   activity  the daily activity report: collect, summarize, store
   checkin   answer one check-in
+  manager   manager role only: collect the company context of a date and post it
   schedule  launchd install and self-heal
   poll      one poll cycle, in its fixed order
   status    what is happening now

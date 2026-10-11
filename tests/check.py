@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import support  # noqa: E402
 import check_activity, check_checkin, check_claude, check_cli, check_config, check_launcher  # noqa: E402,E401
-import check_poll, check_privacy, check_schedule, check_status, check_store  # noqa: E402,E401
+import check_manager, check_poll, check_privacy, check_schedule, check_status, check_store  # noqa: E402,E401
 
 
 def run_all():
@@ -34,6 +34,14 @@ def run_all():
     check_activity.check_attempt_cap(scripts_dir)
     check_poll.check_poll_order(scripts_dir)
     check_claude.check_claude_flags()
+    check_manager.check_claim_role()
+    check_manager.check_context_step()
+    check_manager.check_gate_and_clip()
+    check_manager.check_rejected_and_attempts()
+    check_manager.check_poll_roles()
+    check_manager.check_manager_consent()
+    check_manager.check_readonly_flags()
+    check_manager.check_readonly_gate()
     check_config.check_day_boundary()
     check_store.check_prune()
     check_schedule.check_heal_schedule()

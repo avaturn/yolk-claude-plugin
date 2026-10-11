@@ -6,6 +6,7 @@
   sync                        fetch briefs + heartbeat
   status [--wait N]           what is happening now (JSON); --wait N waits up to N s for it to finish
   heal                        re-point/install the poller if needed; flag missing Full Disk Access (SessionStart hook)
+  manager-consent             record the manager's consent to the context collection (/yolk:setup)
   leave                       revoke this device's token
 
 `poll` and `summarize` hold `.lock`. A 401 anywhere means the token is revoked: agent.json is
@@ -23,7 +24,7 @@ import urllib.parse
 
 from . import VERSION, activity, api, config, poll, schedule, status, store
 
-ACTIONS = ("poll", "claim", "sync", "leave", "summarize", "status", "heal")
+ACTIONS = ("poll", "claim", "sync", "leave", "summarize", "status", "heal", "manager-consent")
 
 
 def claim(code):
@@ -46,11 +47,12 @@ def claim(code):
         raise SystemExit(f"Linking failed (HTTP {code_status}).")
     emp = body["employee"]
     cfg = {"server": server, "device_token": body["device_token"], "employee_id": emp["id"],
+           "role": body.get("role") if body.get("role") in ("employee", "manager") else "employee",
            "name": emp.get("name"), "timezone": emp.get("timezone") or config.machine_timezone(),
            "poll_interval_s": body.get("poll_interval_s", 1200)}
     store.write_private(config.CONFIG_FILE, json.dumps(cfg, indent=1) + "\n")
     config.PROFILE_FILE.write_text((emp.get("profile_md") or "").strip() + "\n")
-    store.log(f"Linked to {server} as {emp.get('name')} ({emp['id']}), timezone {cfg['timezone']}.")
+    store.log(f"Linked to {server} as {emp.get('name')} ({emp['id']}), role {cfg['role']}, timezone {cfg['timezone']}.")
     poll.sync_briefs(cfg)
     poll.heartbeat(cfg)
 
@@ -62,6 +64,14 @@ def leave(cfg):
         pass  # already revoked on the server
     config.CONFIG_FILE.unlink()
     store.log(f"This Mac is unlinked from Yolk. Briefs, old reports, local summaries and the audit trail stay in {config.YOLK_HOME}.")
+
+
+def manager_consent(cfg):
+    """The manager said yes to the context collection (setup step 4b): only now does a poll collect."""
+    if cfg.get("role") != "manager":
+        raise SystemExit("This device is not a manager's.")
+    store.write_private(config.CONFIG_FILE, json.dumps({**cfg, "context_consent": True}, indent=1) + "\n")
+    store.log("Manager consent recorded: the plugin will collect company context once per date.")
 
 
 def sync(cfg):
@@ -89,6 +99,7 @@ def poll_cycle(cfg, args):
 # function object), so a test can patch `cli.leave`.
 COMMANDS = {
     "leave": lambda cfg, a: leave(cfg),
+    "manager-consent": lambda cfg, a: manager_consent(cfg),
     "sync": lambda cfg, a: sync(cfg),
     "status": lambda cfg, a: print(json.dumps(status.wait(cfg, a.wait) if a.wait else status.report(cfg), indent=1)),
     "summarize": lambda cfg, a: locked(lambda: activity.summarize_cli(cfg, a.date, a.limit, a.verbose)),
@@ -125,7 +136,7 @@ def main():
                 print(hint)
         return
     store.ensure_dirs()
-    if a.action not in ("leave", "status"):  # status is read-only; a heal could unload a running poll
+    if a.action not in ("leave", "status", "manager-consent"):  # status is read-only; a heal could unload a running poll
         schedule.heal_schedule()
     try:
         if a.action == "claim":

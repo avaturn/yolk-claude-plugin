@@ -44,6 +44,19 @@ def pending(cfg):
     return (body or {}).get("question_sets", [])
 
 
+def context_pending(cfg):
+    """Manager only: the dates whose context the server still wants. Any non-200 (an older server,
+    an employee token) means nothing to collect."""
+    status, body = request(cfg, "GET", "/v1/context/pending")
+    return (body or {}).get("dates", []) if status == 200 else []
+
+
+def post_context(cfg, date, body):
+    """Manager only: post one date's context; returns the HTTP status."""
+    status, _ = request(cfg, "POST", f"/v1/context/{date}", body)
+    return status
+
+
 def send_answers(cfg, set_id, body):
     """Post one set's answers; returns the HTTP status."""
     status, _ = request(cfg, "POST", f"/v1/questions/{set_id}/answers", body)

@@ -4,7 +4,7 @@ Everything here is read once, at import: YOLK_HOME and YOLK_SERVER come from the
 or a local server sets them before the first import), the rest is fixed.
 
 Data kept under YOLK_HOME (default ~/.claude/yolk):
-  agent.json              server, device_token, employee_id, timezone, poll_interval_s (0600)
+  agent.json              server, device_token, employee_id, role, timezone, poll_interval_s (0600)
   profile.md              the profile the manager registered
   status.json             progress of the poll: phases, dates, check-in dates, Full Disk Access; never content
   briefs/<date>.json      coach briefs (reports/ holds older daily reports, no longer written)
@@ -13,7 +13,8 @@ Data kept under YOLK_HOME (default ~/.claude/yolk):
   days/<date>.attempts    failed builds of that day so far; .cooldown: claude failed, wait
   outbox/<set id>.json    answers saved but not yet accepted by the server
   audit/                  agent.log, <set id>.raw.json (before the privacy gate), <set id>.sent.json,
-                          summary-<date>.failed.json (a day given up on)
+                          summary-<date>.failed.json (a day given up on); manager role:
+                          context-<date>.raw.json / .sent.json / .rejected.json / .failed.json
   bin/launcher.py         what launchd runs (copied by install_schedule.sh)
 
 The clock: the server judges dates in the employee's timezone, the collectors cut days in the
@@ -42,6 +43,7 @@ AUDIT_DIR = YOLK_HOME / "audit"
 # not in agents/: files there register as `yolk:*` subagents in every Claude Code session
 CHARTER = PLUGIN_ROOT / "charters" / "employee-investigator.md"
 SUMMARIZER_CHARTER = PLUGIN_ROOT / "charters" / "day-summarizer.md"
+CONTEXT_CHARTER = PLUGIN_ROOT / "charters" / "context-collector.md"  # manager role only
 COLLECTORS_DIR = SCRIPTS_DIR / "collectors"
 INSTALL_SCRIPT = SCRIPTS_DIR / "install_schedule.sh"
 LAUNCH_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.yolk.agent.plist"
@@ -57,6 +59,8 @@ SUMMARY_TIMEOUT_S = 600     # the summarizer only reads one JSON blob and answer
 COLLECTOR_TIMEOUT_S = 120
 SUMMARY_BACKFILL_DAYS = 7   # finished days from today-7 to yesterday are summarized
 BACKFILL_PER_POLL = 2       # after the answers; a question date's own summary is not limited
+CONTEXT_TIMEOUT_S = 1200    # manager role: one read-only collector run per date
+CONTEXT_MAX_ATTEMPTS = 3    # failed collector runs of one date before it is given up
 SUMMARY_MAX_ATTEMPTS = 3    # failed builds of one day before it is given up
 COOLDOWN_S = 6 * 3600       # a day whose claude run exited non-zero is left alone this long
 RAW_KEEP_DAYS = 14          # days/* files older than this are deleted

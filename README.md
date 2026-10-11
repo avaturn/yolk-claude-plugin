@@ -14,6 +14,17 @@ daily report and the coach brief it builds for you.
   processes them under your own account. They are never sent to Yolk or your manager.
 - Everything sent is kept in `~/.claude/yolk/audit/`. No API key is needed.
 
+## Manager role
+
+A plugin claimed with a **manager** invite code works as an employee plugin and also collects company
+context once per date. It reads the manager's own Claude Code connectors (Linear, GitHub, public Slack search,
+team meetings, planning docs, Notion, Drive, monday boards, CRM/HubSpot) **read-only**: no built-in tools, only an explicit list of read-only
+connector tools. It sends the server company goals and business-level facts about each employee's work
+that day, each with its source, after the same privacy filter. The Manager AI turns them into extra
+check-in questions, which employees can read. DMs, private channels, 1:1 and board meetings, HR material
+and individual deal amounts are out of scope. `/yolk:setup` asks for a separate consent for this role, and
+leaves if it is declined. Sent context is kept in `~/.claude/yolk/audit/context-*`.
+
 ## Install
 
 1. In Claude Code: `/plugin marketplace add avaturn/yolk-plugin-agent`, then
