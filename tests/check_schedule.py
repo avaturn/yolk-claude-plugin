@@ -13,9 +13,17 @@ from support import CFG, clean_dirs, agent_log
 from yolk import api, cli, config, poll, schedule, store
 
 
+def fake_file(path):
+    """An existing file: heal only checks that the job's python3 exists."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+    return str(path)
+
+
 def check_heal_schedule():
     clean_dirs()
     tmp = Path(tempfile.mkdtemp(prefix="yolk-plist-"))
+    apple = fake_file(tmp / "dev" / config.APPLE_PYTHON_APP)   # an Apple Python.app job stays without xcode-select
     real_plist, real_install = config.LAUNCH_PLIST, schedule.install_schedule
     config.LAUNCH_PLIST = tmp / "com.yolk.agent.plist"  # never the real ~/Library/LaunchAgents
     calls = []
@@ -39,16 +47,16 @@ def check_heal_schedule():
         launcher = config.YOLK_HOME / "bin" / "launcher.py"
         launcher.parent.mkdir(exist_ok=True)
         launcher.write_bytes((config.SCRIPTS_DIR / "launcher.py").read_bytes())      # the installed copy is current
-        plist("/usr/bin/python3", str(launcher))                          # current: untouched
+        plist(apple, str(launcher))                          # current: untouched
         schedule.heal_schedule()
         assert not calls
         link = tmp / "linked-bin"
         link.symlink_to(launcher.parent)
-        plist("/usr/bin/python3", str(link / "launcher.py"))              # same file through a symlink: current
+        plist(apple, str(link / "launcher.py"))              # same file through a symlink: current
         schedule.heal_schedule()
         assert not calls
         # a launcher copy that differs from this version's is re-copied (install re-runs)
-        plist("/usr/bin/python3", str(launcher))
+        plist(apple, str(launcher))
         launcher.write_text("# an older launcher\n")
         schedule.heal_schedule()
         assert len(calls) == 1 and "outdated launcher" in agent_log()
@@ -56,16 +64,16 @@ def check_heal_schedule():
         launcher.write_bytes((config.SCRIPTS_DIR / "launcher.py").read_bytes())
         # a 1.6.3 plist (launcher path + StartInterval) migrates to the calendar schedule
         n0 = len(calls)
-        plist("/usr/bin/python3", str(launcher), schedule={"StartInterval": 1200})
+        plist(apple, str(launcher), schedule={"StartInterval": 1200})
         schedule.heal_schedule()
         assert len(calls) == n0 + 1 and "used the old schedule" in agent_log()
-        plist("/usr/bin/python3", str(launcher), schedule={"StartInterval": 1200, "StartCalendarInterval": [{"Minute": 0}]})
+        plist(apple, str(launcher), schedule={"StartInterval": 1200, "StartCalendarInterval": [{"Minute": 0}]})
         schedule.heal_schedule()
         assert len(calls) == n0 + 2                                           # both keys: still old
-        plist("/usr/bin/python3", str(launcher), schedule={})
+        plist(apple, str(launcher), schedule={})
         schedule.heal_schedule()
         assert len(calls) == n0 + 3                                           # neither key
-        plist("/usr/bin/python3", str(launcher))
+        plist(apple, str(launcher))
         schedule.heal_schedule()
         assert len(calls) == n0 + 3                                           # current: untouched
         calls[:] = calls[:n0]
@@ -208,10 +216,14 @@ def check_install_script_plist():
     def minutes(plist):
         return [d["Minute"] for d in plist["StartCalendarInterval"]]
     fda = script("--fda-path")
-    # no side effects (Apple's python3 still writes its own ~/Library/Caches): no YOLK_HOME/bin/launcher.py, no plist, no launchctl
+    # no side effects (a fallback python3 may still write its own ~/Library/Caches): no YOLK_HOME/bin/launcher.py, no plist, no launchctl
     assert not (home / ".claude").exists() and not (home / "Library" / "LaunchAgents").exists() and not (home / "launchctl.log").exists()
     plist = install()
-    assert fda == [os.path.realpath(plist["ProgramArguments"][0])], fda   # setup grants what the job runs
+    if schedule.apple_python():                                        # developer tools have Python.app: its bundle
+        assert plist["ProgramArguments"][0].endswith("/" + config.APPLE_PYTHON_APP)
+        assert fda == [plist["ProgramArguments"][0][:-len("/Contents/MacOS/Python")]], fda
+    else:
+        assert fda == [os.path.realpath(plist["ProgramArguments"][0])], fda   # setup grants what the job runs
     assert minutes(plist) == [0, 20, 40] and "StartInterval" not in plist         # wake-proof calendar schedule
     assert minutes(install(600)) == [0, 10, 20, 30, 40, 50]
     assert minutes(install(3600)) == [0] and minutes(install(7200)) == [0]       # an hour or more: hourly
@@ -281,27 +293,29 @@ def check_heal_action_and_hook():
         config.CONFIG_FILE.unlink(missing_ok=True)
         assert heal() == [] and not calls                                  # not linked: silent, nothing installed
         config.CONFIG_FILE.write_text("{}")
-        plist("/usr/bin/python3", str(launcher))
+        apple, homebrew = (fake_file(tmp / d) for d in ("dev/" + config.APPLE_PYTHON_APP, "homebrew/bin/python3"))
+        schedule.apple_python = lambda: (_ for _ in ()).throw(AssertionError("xcode-select ran"))
+        plist(apple, str(launcher))
         assert heal() == [] and not calls                                  # nothing to change: silent
-        # a python3 whose grant works stays; else the job moves to Apple's, when there is one
-        schedule.apple_python = lambda: "/usr/bin/python3"
-        plist("/opt/homebrew/bin/python3", str(launcher))
-        store.set_status(full_disk_access=True)
-        schedule.heal_schedule()
-        assert not calls
-        for fda in (False, None):                                          # grant lost, or never probed
-            store.set_status(full_disk_access=fda)
+        schedule.heal_schedule()                                           # any Apple Python.app stays, no xcode-select
+        # any other python3 moves to Apple's Python.app, when there is one
+        schedule.apple_python = lambda: apple
+        for python in ("/usr/bin/python3", homebrew):
+            plist(python, str(launcher))
             before = agent_log()
             schedule.heal_schedule()
-            assert "Full Disk Access does not last" in agent_log()[len(before):]
+            assert "did not run Apple's Python.app" in agent_log()[len(before):]
         assert len(calls) == 2
-        schedule.apple_python = lambda: None                               # no developer tools: any python3 stays
+        schedule.apple_python = lambda: None                               # no developer tools: an existing python3 stays
         schedule.heal_schedule()
         assert len(calls) == 2
+        plist(str(tmp / "gone" / "python3"), str(launcher))                # ...one that no longer exists moves anyway
+        schedule.heal_schedule()
+        assert len(calls) == 3 and "python3 that no longer exists" in agent_log()
         calls.clear()
         # the hint names what macOS checks (symlinks resolved), once a day, never in the job's own claude -p
         link = tmp / "python3"
-        link.symlink_to(sys.executable)
+        link.symlink_to(homebrew)
         plist(str(link), str(launcher))
         assert heal() == []                                                # never denied: silent
         store.set_status(full_disk_access=False)
@@ -311,6 +325,10 @@ def check_heal_action_and_hook():
         out = heal()
         assert len(out) == 1 and os.path.realpath(link) in out[0] and str(link) not in out[0] and not calls, out
         assert heal() == []                                                # ...once a day
+        config.FDA_HINT_FILE.unlink()
+        plist(apple, str(launcher))                                        # Apple's: the bundle, not its executable
+        out = heal()
+        assert len(out) == 1 and f"> {os.path.realpath(apple)[:-len('/Contents/MacOS/Python')]}, " in out[0], out
         config.FDA_HINT_FILE.unlink()
         config.LAUNCH_PLIST.unlink()
         assert schedule.full_disk_access_hint() is None                    # no plist: no path to name

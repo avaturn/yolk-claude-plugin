@@ -45,12 +45,13 @@ def _reinstall(what, done, failed):
 
 
 def apple_python():
-    """/usr/bin/python3 when developer tools back the shim, else None. Mirrors install_schedule.sh."""
+    """Apple's Python.app executable when developer tools have it, else None. Mirrors install_schedule.sh."""
     try:
         dev = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True, timeout=5).stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return None
-    return "/usr/bin/python3" if dev and os.access(os.path.join(dev, "usr", "bin", "python3"), os.X_OK) else None
+    python = os.path.join(dev, config.APPLE_PYTHON_APP)
+    return python if dev and os.access(python, os.X_OK) else None
 
 
 def run_by_launchd():
@@ -77,7 +78,7 @@ def record_full_disk_access():
 def full_disk_access_hint():
     """One line for the session when the job's last poll was denied Screen Time, else None. At most once a
     local day, and never in the job's own runs: their SessionStart hook output would reach answers. It names
-    what macOS checks: the program launchd starts, symlinks resolved."""
+    what macOS checks: the program launchd starts, symlinks resolved, or the app bundle it is in."""
     hint_file = config.FDA_HINT_FILE
     if (run_by_launchd() or store.read_status().get("full_disk_access") is not False
             or hint_file.exists() and date.fromtimestamp(hint_file.stat().st_mtime) == date.today()):
@@ -86,6 +87,8 @@ def full_disk_access_hint():
         path = os.path.realpath(plistlib.loads(config.LAUNCH_PLIST.read_bytes())["ProgramArguments"][0])
     except Exception:  # noqa: BLE001
         return None
+    app, sep, _ = path.partition(".app/Contents/MacOS/")
+    path = app + ".app" if sep else path
     hint_file.touch()
     return ("Yolk: Screen Time is blocked because the background job has no Full Disk Access. Tell the user: "
             f'System Settings > Privacy & Security > Full Disk Access > "+" > Cmd+Shift+G > {path}, then turn it on.')
@@ -120,9 +123,10 @@ def heal_schedule():
         reason = "ran an outdated launcher"
     elif not on_calendar:
         reason = "used the old schedule"
-    elif (plist["ProgramArguments"][0] == "/usr/bin/python3" or store.read_status().get("full_disk_access") is True
-          or apple_python() is None):  # xcode-select last: it is the only subprocess
-        return  # on Apple's python3 already, its grant works now, or there is none to move to
+    elif not os.path.exists(python := plist["ProgramArguments"][0]):
+        reason = "ran a python3 that no longer exists"
+    elif python.endswith("/" + config.APPLE_PYTHON_APP) or apple_python() is None:  # xcode-select last: the only subprocess
+        return  # on an Apple Python.app already (any developer dir: no flip-flop), or there is none to move to
     else:
-        reason = "used a python3 whose Full Disk Access does not last"
+        reason = "did not run Apple's Python.app, whose Full Disk Access lasts"
     _reinstall(f"The background poller {reason}", "updated it.", "could not update it (run scripts/install_schedule.sh).")

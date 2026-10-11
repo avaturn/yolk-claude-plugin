@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 from support import CFG, REAL_RUN_CLAUDE, clean_dirs
-from yolk import api, claude, cli, config, manager, poll, store
+from yolk import VERSION, api, claude, cli, config, manager, poll, store
 
 MGR = {**CFG, "role": "manager", "context_consent": True}
 EMP = [{"id": "matt", "name": "Matt Rossi", "role": "AE", "timezone": "Europe/Rome", "profile_md": "gh: mrossi"}]
@@ -73,7 +73,7 @@ def check_context_step():
     assert set(body) == {"generated_at", "agent_version", "privacy_redactions", "goals", "employees", "sources_checked"}
     assert body["employees"] == [{"employee_id": "matt", "facts": [
         {"text": "Merged PR 42", "source": "github:o/r#42", "confidence": None}]}]       # ghost dropped, bad enum -> None
-    assert body["agent_version"] == "1.8.0"
+    assert body["agent_version"] == VERSION
     for d in ("2026-10-08", "2026-10-09"):
         assert (config.AUDIT_DIR / f"context-{d}.raw.json").exists() and (config.AUDIT_DIR / f"context-{d}.sent.json").exists()
     assert not list(config.OUTBOX_DIR.glob("*"))                                           # nothing in outbox/

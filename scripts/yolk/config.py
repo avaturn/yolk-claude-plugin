@@ -51,6 +51,8 @@ SCREEN_TIME_DB = Path.home() / "Library/Application Support/Knowledge/knowledgeC
 FDA_HINT_FILE = YOLK_HOME / ".fda_hint"  # its mtime: the day the session was last told Screen Time is blocked
 DEFAULT_YOLK_HOME = Path.home() / ".claude" / "yolk"
 INSTALLED_PLUGINS_DIR = (Path.home() / ".claude" / "plugins").resolve()
+# what the poller runs, relative to `xcode-select -p`; must match install_schedule.sh
+APPLE_PYTHON_APP = "Library/Frameworks/Python3.framework/Versions/Current/Resources/Python.app/Contents/MacOS/Python"
 
 CLAUDE_MODEL = "claude-opus-5-5"
 CLAUDE_EFFORT = "high"

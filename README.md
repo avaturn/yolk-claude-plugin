@@ -57,7 +57,7 @@ at the next poll (one collector run, newest pending date first).
 - What is happening: `python3 ~/.claude/yolk/bin/launcher.py status`
 - Screen Time missing: if `status` shows `"full_disk_access": false`, grant Full Disk Access to the
   path `bash <plugin>/scripts/install_schedule.sh --fda-path` prints, or the session hint names
-  (usually `/usr/bin/python3`).
+  (usually `.../Python3.framework/Versions/Current/Resources/Python.app`).
 
 ## For admins
 
@@ -80,8 +80,8 @@ The repo is private: each machine needs git access to it. Users still run `/yolk
 
 Screen Time needs Full Disk Access, which MDM can grant without user action with a PPPC profile
 (Privacy Preferences Policy Control; needs user-approved MDM): service `SystemPolicyAllFiles`,
-`Identifier` `/usr/bin/python3`, `IdentifierType` `path`, `CodeRequirement`
-`identifier "com.apple.dt.xcode_select.tool-shim-public" and anchor apple`, `Allowed` `true`. It
-applies when developer tools (Command Line Tools or Xcode) are installed (the job then runs
-`/usr/bin/python3`). The grant covers any launchd job that runs `/usr/bin/python3`, so any code running
-as the user could add such a job and get Full Disk Access; decide with that in mind.
+`Identifier` `com.apple.python3`, `IdentifierType` `bundleID`, `CodeRequirement`
+`identifier "com.apple.python3" and anchor apple`, `Allowed` `true`. It applies when developer tools
+(Command Line Tools or Xcode) are installed (the job then runs Apple's `Python.app`). The grant covers
+anything launchd starts as Apple's `Python.app` executable, so any code running as the user could add
+such a job and get Full Disk Access; decide with that in mind.

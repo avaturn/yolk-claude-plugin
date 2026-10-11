@@ -8,13 +8,17 @@ YOLK_HOME="${YOLK_HOME:-$HOME/.claude/yolk}"
 PLIST="$HOME/Library/LaunchAgents/com.yolk.agent.plist"
 OLD_PLIST="$HOME/Library/LaunchAgents/com.hrforai.agent.plist"  # v1.1 git poller
 LOG_DIR="$YOLK_HOME/audit"
-# Apple-signed path that never changes, so its Full Disk Access grant survives updates (Homebrew's path
-# changes on every upgrade). Only when developer tools back the /usr/bin shim: else it opens an install dialog
+# macOS checks Full Disk Access for the program launchd starts, symlinks resolved: not your terminal, not
+# sys.executable. Launched directly, Apple's Python.app executable is checked by its bundle ID
+# (com.apple.python3), so its path and updates do not matter. Not /usr/bin/python3: a shim hard-linked with
+# git, clang and others, which macOS may report as /usr/bin/git instead
 DEV="$(xcode-select -p 2>/dev/null || true)"
-if [ -n "$DEV" ] && [ -x "$DEV/usr/bin/python3" ]; then PY_BIN=/usr/bin/python3; else PY_BIN="$(command -v python3)"; fi
-# macOS checks Full Disk Access for the program launchd starts, symlinks resolved: not your terminal,
-# not sys.executable
-FDA_PATH="$("$PY_BIN" -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PY_BIN")"
+APP="$DEV/Library/Frameworks/Python3.framework/Versions/Current/Resources/Python.app"
+if [ -n "$DEV" ] && [ -x "$APP/Contents/MacOS/Python" ]; then PY_BIN="$APP/Contents/MacOS/Python"; FDA_PATH="$APP"
+else
+  PY_BIN="$(command -v python3)"
+  FDA_PATH="$("$PY_BIN" -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PY_BIN")"
+fi
 # --fda-path: /yolk:setup grants Full Disk Access before the first poll, so it needs the path without installing
 if [ "${1:-}" = "--fda-path" ]; then echo "$FDA_PATH"; exit 0; fi
 mkdir -p "$LOG_DIR" "$(dirname "$PLIST")" "$YOLK_HOME/bin"
