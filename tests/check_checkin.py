@@ -1,5 +1,7 @@
 """checkin: the answers outbox."""
+import json
 import os
+from datetime import date
 
 from support import CFG, clean_dirs, agent_log
 from yolk import activity, api, checkin, config, poll, store
@@ -60,3 +62,27 @@ def check_atomic_and_corrupt_outbox():
     # an outbox body written by the poller is atomic and private too
     store.write_private(config.OUTBOX_DIR / "qs_1.json", "{}")
     assert (config.OUTBOX_DIR / "qs_1.json").stat().st_mode & 0o777 == 0o600
+
+
+def check_send_path_redacts():
+    """A fake investigator answer with a secret and a code fence: the outbox file and the POST body are redacted."""
+    clean_dirs()
+    dirty = "key sk-ant-abcdefghijkl and ```\n1\n2\n3\n4\n``` done"
+    posts = []
+    real_api, real_inv = api.request, checkin.investigate
+    api.request = lambda cfg, m, path, body=None, auth=True: (posts.append((path, body)), (201, None))[1]
+    checkin.investigate = lambda *a: {"answers": [{"question_id": "q1", "answer": dirty, "evidence": dirty, "confidence": "high",
+                                                   "extra": "x"}]}
+    try:
+        ok, _, _ = checkin.answer(CFG, {"id": "qs_priv", "date": "2020-01-01", "round": 1, "questions": []},
+                                  "role", date.today(), None, False)
+    finally:
+        api.request, checkin.investigate = real_api, real_inv
+    assert ok and [p for p, _ in posts] == ["/v1/questions/qs_priv/answers"], posts
+    body = posts[0][1]
+    assert body["privacy_redactions"] == ["code_block", "secret_pattern"], body["privacy_redactions"]
+    item = body["answers"]["answers"][0]
+    assert item["answer"] == "key [secret redacted] and [code block redacted by privacy gate] done" and item["evidence"] == item["answer"]
+    assert "extra" not in item
+    sent = (config.AUDIT_DIR / "qs_priv.sent.json").read_text()
+    assert "sk-ant" not in sent and "1\\n2" not in sent and json.loads(sent) == body

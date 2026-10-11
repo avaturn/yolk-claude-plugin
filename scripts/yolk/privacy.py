@@ -85,7 +85,7 @@ def answers_payload(raw):
             item["evidence"] = str(a["evidence_basis"])  # the charter's old name; never send both
         item["answer"] = item.get("answer", "")
         confidence = item.get("confidence", "").lower()
-        item["confidence"] = confidence if confidence in ("high", "medium", "low") else None
+        item["confidence"] = confidence if confidence in CONFIDENCES else None
         items.append(item)
     context = raw.get("volunteered_context")
     return {"answers": items, "volunteered_context": str(context) if context else None}

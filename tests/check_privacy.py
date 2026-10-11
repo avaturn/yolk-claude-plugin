@@ -60,3 +60,46 @@ def check_contract():
     assert "code_block" in violations and "secret_pattern" in violations, violations
     assert len(out["blocks"][0]["what"]) <= 300 and len(out["blocks"][0]["where"]) <= 200
     assert "sk-ant" not in json.dumps(out)
+
+
+def check_gate_rules():
+    secrets = ["sk-ant-abcdefghijkl", "ghp_" + "a1" * 8, "AKIA" + "ABCDEFGHIJKLMNOP", "xoxb-1234567890-abc",
+               "-----BEGIN RSA PRIVATE KEY-----\nMIIBOg\n-----END RSA PRIVATE KEY-----",
+               "eyJ" + "a" * 20 + "." + "b" * 10 + "." + "c" * 10, "password: hunter2"]
+    assert len(secrets) == len(privacy.SECRET_RES)               # one sample per pattern, in order
+    for rx, sample in zip(privacy.SECRET_RES, secrets):
+        assert rx.search(sample), sample
+        out, v = privacy.sanitize_text(f"see {sample} here")
+        assert v == ["secret_pattern"] and "[secret redacted]" in out and sample not in out, (sample, out, v)
+    assert privacy.sanitize_text("plain business text") == ("plain business text", [])
+
+    out, v = privacy.sanitize_text("a ```\n1\n2\n3\n4\n``` b")               # fenced: more than 3 lines
+    assert v == ["code_block"] and out == "a [code block redacted by privacy gate] b", (out, v)
+    short = "a ```\n1\n2\n```"
+    assert privacy.sanitize_text(short) == (short, [])                       # a short fence stays
+    out, v = privacy.sanitize_text("intro\n" + "import os\n" * 4 + "outro")    # unfenced: 4+ code-looking lines
+    assert v == ["unfenced_code_dump"] and "import os" not in out and "outro" in out, (out, v)
+    assert privacy.sanitize_text("import os\n" * 3)[1] == []
+    out, v = privacy.sanitize_text("a" * 6001)
+    assert v == ["oversized_answer_truncated"] and out == "a" * 6000 + " …[truncated by privacy gate]"
+    assert privacy.sanitize_text("a" * 6000)[1] == []
+
+    clean, v = privacy.sanitize_answers({"answers": [{"answer": "k sk-ant-abcdefghijkl"}], "n": 3})   # walks nested values
+    assert clean == {"answers": [{"answer": "k [secret redacted]"}], "n": 3} and v == ["secret_pattern"]
+
+
+def check_answers_payload():
+    out = privacy.answers_payload({"answers": [
+        {"question_id": "q1", "answer": "a", "evidence": "e", "evidence_basis": "old", "confidence": "HIGH", "extra": "x"},
+        {"question_id": "q2", "answer": "b", "evidence_basis": "old name", "confidence": "certain"},
+        {"question_id": "q3"},
+        {"answer": "no id"}, "junk"],
+        "volunteered_context": "ctx", "evil": 1})
+    assert out == {"answers": [
+        {"question_id": "q1", "answer": "a", "evidence": "e", "confidence": "high"},     # one evidence key, no extras
+        {"question_id": "q2", "answer": "b", "evidence": "old name", "confidence": None},  # evidence_basis renamed
+        {"question_id": "q3", "answer": "", "confidence": None}],
+        "volunteered_context": "ctx"}, out
+    assert privacy.answers_payload({}) == {"answers": [], "volunteered_context": None}
+    assert [privacy.answers_payload({"answers": [{"question_id": "q", "confidence": c}]})["answers"][0]["confidence"]
+            for c in ("high", "Medium", "LOW", "")] == ["high", "medium", "low", None]

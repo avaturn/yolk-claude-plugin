@@ -9,7 +9,7 @@
     {
       "name": "yolk",
       "source": "./",
-      "description": "Answers your daily Yolk check-in from your own activity data; shows your daily report and coach brief."
+      "description": "Answers your manager's AI daily check-in questions automatically from your own activity data; shows your daily report and coach brief."
     }
   ]
 }

@@ -2,7 +2,6 @@
 the config every check uses, and the helpers they share. Not a check itself."""
 import contextlib
 import os
-import subprocess
 import sys
 import tempfile
 from datetime import date

@@ -20,6 +20,8 @@ import check_poll, check_privacy, check_schedule, check_status, check_store  # n
 
 def run_all():
     check_privacy.check_contract()
+    check_privacy.check_gate_rules()
+    check_privacy.check_answers_payload()
     check_activity.check_missing_days()
     check_cli.check_claim()
     check_store.check_latest_brief()
@@ -28,6 +30,7 @@ def run_all():
     check_checkin.check_heartbeat_and_answers_flush()
     check_activity.check_summarize_and_investigate(scripts_dir)
     check_checkin.check_atomic_and_corrupt_outbox()
+    check_checkin.check_send_path_redacts()
     check_activity.check_attempt_cap(scripts_dir)
     check_poll.check_poll_order(scripts_dir)
     check_claude.check_claude_flags()

@@ -2,7 +2,7 @@
 import json
 import os
 import urllib.error
-from datetime import date, timedelta
+from datetime import timedelta
 
 from support import CFG, clean_dirs, fake_collectors
 from yolk import activity, api, checkin, claude, config, poll, store

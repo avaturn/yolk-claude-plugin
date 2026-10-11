@@ -1,14 +1,14 @@
 # Yolk
 
-A Claude Code plugin for your organization's daily check-in. Once a day the Yolk server asks you
-one question about your workday. This plugin answers it from your own activity data, on your
-computer, and shows you the daily report and the coach brief it builds for you.
+A Claude Code plugin for your organization's daily check-in. Each day your manager's AI asks a few
+questions about how you worked (work monitoring). A background job answers them automatically from
+your own activity data, on your computer, without asking you to review each answer, and shows you the
+daily report and the coach brief it builds for you.
 
 ## What leaves your computer, and what stays
 
-- **Leaves:** only the sanitized answer to the server's daily question, over HTTPS, at business
-  level (meeting subjects, document titles, client names). Code, prompts, commands, messages,
-  URLs and secrets are filtered out, and personal activity is reported only as a total.
+- **Leaves:** only sanitized answers to the questions from your manager's AI, over HTTPS, at business
+  level (meeting subjects, document titles, client names). The agent is instructed never to include raw code or file contents, verbatim prompts or chats, email or message bodies, full URLs or secrets; it may paraphrase, judge how the user works with AI, and name work pages by title or domain. A deterministic filter also removes code blocks and secret-shaped strings before anything is sent. Personal activity is reported only as a total.
 - **Stays:** your raw activity data (Claude Code sessions, Screen Time, git, browser history of
   Chrome, Arc, Brave, Edge, Chromium and Vivaldi) and your daily activity reports. Claude
   processes them under your own account. They are never sent to Yolk or your manager.
@@ -34,12 +34,12 @@ computer, and shows you the daily report and the coach brief it builds for you.
 
 ## Uninstall
 
-`/yolk:leave`, then `claude plugin uninstall yolk@yolk`. Delete `~/.claude/yolk/` if you do not
-need your briefs and reports.
+`/yolk:leave`, then `claude plugin uninstall yolk@yolk`. After `/yolk:leave` nothing prunes
+`~/.claude/yolk/` any more: the raw data in `days/` stays until you delete that folder.
 
 ## Troubleshooting
 
-- Run the background job now: `launchctl kickstart -k gui/$(id -u)/com.yolk.agent`
+- Run the background job now: `launchctl kickstart gui/$(id -u)/com.yolk.agent`
 - Logs: `~/.claude/yolk/audit/agent.log` and `poller.log`.
 - What is happening: `python3 ~/.claude/yolk/bin/launcher.py status`
 
