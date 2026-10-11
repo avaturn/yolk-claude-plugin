@@ -23,7 +23,8 @@ connector tools. It sends the server company goals and business-level facts abou
 that day, each with its source, after the same privacy filter. The Manager AI turns them into extra
 check-in questions, which employees can read. DMs, private channels, 1:1 and board meetings, HR material
 and individual deal amounts are out of scope. `/yolk:setup` asks for a separate consent for this role, and
-leaves if it is declined. Sent context is kept in `~/.claude/yolk/audit/context-*`.
+leaves if it is declined. Sent context is kept in `~/.claude/yolk/audit/context-*`. `/yolk:context` collects it now instead of
+at the next poll (one collector run, newest pending date first).
 
 ## Install
 
@@ -41,6 +42,7 @@ leaves if it is declined. Sent context is kept in `~/.claude/yolk/audit/context-
 | `/yolk:setup <code>` | Consent, link this computer, start the background job |
 | `/yolk:brief [date]` | Your coach brief; if it is not ready, says what is happening |
 | `/yolk:report [date]` | Your own daily activity report |
+| `/yolk:context` | Manager only: collect the company context now and show what was sent |
 | `/yolk:leave` | Unlink this computer and stop the background job |
 
 ## Uninstall

@@ -214,3 +214,60 @@ def check_readonly_gate():
     assert run(json.dumps({"tool_name": "mcp__grafana__user_info"})) == 2
     assert run(json.dumps({"tool_name": "mcp__claude_ai_Slack__slack_send_message"})) == 2
     assert run("not json") == 2 and run("") == 2 and run("{}") == 2
+
+
+def check_context_action():
+    import contextlib
+    import io
+    import types
+    from support import hold_lock
+
+    def run(cfg, stub):
+        """cli.COMMANDS['context'] with agent.json cfg; returns (parsed stdout JSON or None, log text)."""
+        buf = io.StringIO()
+        with stub, contextlib.redirect_stdout(buf):
+            cli.COMMANDS["context"](cfg, types.SimpleNamespace(verbose=False))
+        out = buf.getvalue()
+        return (json.loads(out[out.index("{"):out.rindex("}") + 1]) if "{" in out else None), out
+
+    for cfg in ({**CFG, "role": "employee", "context_consent": True}, {**CFG, "role": "manager"}, CFG):
+        clean_dirs()
+        s = Stub(["2026-10-08"])
+        try:
+            run(cfg, s)
+            raise AssertionError("not refused")
+        except SystemExit as e:
+            assert "Only a linked manager who consented" in str(e)
+        assert not s.events and not s.collected
+    clean_dirs()
+    out, _ = run(MGR, Stub([]))
+    assert out == {"pending": [], "collected": None, "status": "nothing_pending", "audit_file": None}, out
+    clean_dirs()
+    s = Stub(["2026-10-07", "2026-10-08"])
+    out, _ = run(MGR, s)
+    assert out["pending"] == ["2026-10-08", "2026-10-07"] and out["collected"] == "2026-10-08" and out["status"] == "sent"
+    assert out["audit_file"] == str(config.AUDIT_DIR / "context-2026-10-08.sent.json") and len(s.collected) == 1
+    assert not list(config.OUTBOX_DIR.glob("*"))
+    clean_dirs()
+    out, _ = run(MGR, Stub(["2026-10-08"], post_status=409))
+    assert out["status"] == "already_received" and out["audit_file"].endswith("context-2026-10-08.sent.json")
+    clean_dirs()
+    out, _ = run(MGR, Stub(["2026-10-08"], post_status=422))
+    assert out["status"] == "rejected" and out["audit_file"].endswith("context-2026-10-08.rejected.json")
+    clean_dirs()
+    out, _ = run(MGR, Stub(["2026-10-08"], reply="no json"))
+    assert out["status"] == "failed" and out["collected"] == "2026-10-08" and out["audit_file"] is None
+    clean_dirs()
+    s = Stub(["2026-10-08"], reply=claude.ClaudeFailed("rc=1"))
+    run(MGR, s)
+    out, _ = run(MGR, s)                                                                   # now cooling: no second run
+    assert out["status"] == "cooling" and out["collected"] is None and len(s.collected) == 1
+    # a running poll holds .lock: the action says so and does nothing
+    clean_dirs()
+    p = hold_lock(5)
+    try:
+        s = Stub(["2026-10-08"])
+        out, _ = run(MGR, s)
+    finally:
+        p.kill()
+    assert out is None and not s.events and not s.collected

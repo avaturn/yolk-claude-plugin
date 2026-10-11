@@ -6,6 +6,7 @@
   sync                        fetch briefs + heartbeat
   status [--wait N]           what is happening now (JSON); --wait N waits up to N s for it to finish
   heal                        re-point/install the poller if needed; flag missing Full Disk Access (SessionStart hook)
+  context                     collect the company context now (manager role; /yolk:context)
   manager-consent             record the manager's consent to the context collection (/yolk:setup)
   leave                       revoke this device's token
 
@@ -22,9 +23,9 @@ import re
 import socket
 import urllib.parse
 
-from . import VERSION, activity, api, config, poll, schedule, status, store
+from . import VERSION, activity, api, config, manager, poll, schedule, status, store
 
-ACTIONS = ("poll", "claim", "sync", "leave", "summarize", "status", "heal", "manager-consent")
+ACTIONS = ("poll", "claim", "sync", "leave", "summarize", "status", "heal", "manager-consent", "context")
 
 
 def claim(code):
@@ -74,6 +75,17 @@ def manager_consent(cfg):
     store.log("Manager consent recorded: the plugin will collect company context once per date.")
 
 
+def context_now(cfg, verbose):
+    """The `context` action: one context step now, like a poll's, and what came of it as JSON."""
+    if cfg.get("role") != "manager" or not cfg.get("context_consent"):
+        raise SystemExit("Only a linked manager who consented in /yolk:setup can collect context.")
+    out = {}
+    with store.tracked_run():
+        error = manager.context_step(cfg, verbose, out)
+        store.set_status(last_error=error)
+    print(json.dumps(out, indent=1))
+
+
 def sync(cfg):
     poll.sync_briefs(cfg)
     poll.heartbeat(cfg)
@@ -100,6 +112,7 @@ def poll_cycle(cfg, args):
 COMMANDS = {
     "leave": lambda cfg, a: leave(cfg),
     "manager-consent": lambda cfg, a: manager_consent(cfg),
+    "context": lambda cfg, a: locked(lambda: context_now(cfg, a.verbose)),
     "sync": lambda cfg, a: sync(cfg),
     "status": lambda cfg, a: print(json.dumps(status.wait(cfg, a.wait) if a.wait else status.report(cfg), indent=1)),
     "summarize": lambda cfg, a: locked(lambda: activity.summarize_cli(cfg, a.date, a.limit, a.verbose)),

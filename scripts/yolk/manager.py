@@ -99,7 +99,7 @@ def _count_failure(date, e):
 
 
 def post(cfg, date, raw, employee_ids):
-    """Gate, shape and post `raw`. Returns True when the date is finished (sent or rejected)."""
+    """Gate, shape and post `raw`. Returns "sent", "already_received", "rejected", or None (retry later)."""
     clean, violations = privacy.sanitize_answers(raw)
     body = {"generated_at": config.now_iso(), "agent_version": VERSION, "privacy_redactions": violations,
             **shape(clean, employee_ids)}
@@ -109,23 +109,35 @@ def post(cfg, date, raw, employee_ids):
         store.write_private(_audit(date, "sent"), text)
         store.log(f"Sent context for {date}" + (" (server already had it)" if status == 409 else "")
                   + (f" (privacy gate redacted: {violations})" if violations else ""))
-        return True
+        return "already_received" if status == 409 else "sent"
     if status in (400, 404, 422):  # the same body cannot succeed
         store.write_private(_audit(date, "rejected"), text)
         store.log(f"Server rejected the context of {date} (HTTP {status}); kept in audit/context-{date}.rejected.json.")
-        return True
+        return "rejected"
     store.log(f"Could not send the context of {date} (HTTP {status}); retrying next poll.")
-    return False
+    return None
 
 
-def context_step(cfg, verbose):
+def _outcome(out, date, status, replace):
+    """Note in `out` what happened to `date` (the first date handled, or the one collected)."""
+    if replace or out["collected"] is None:
+        status = status or "failed"
+        f = _audit(date, "sent" if status == "already_received" else status)
+        out.update(collected=date, status=status, audit_file=str(f) if f.exists() else None)
+
+
+def context_step(cfg, verbose, out=None):
     """Post the context of every pending date, newest first, with at most ONE collector run per poll
-    (the run holds .lock). Re-posting a saved raw body costs no run. Returns an error label or None."""
+    (the run holds .lock). Re-posting a saved raw body costs no run. Returns an error label or None.
+    `out`, if given, is filled for the `context` action: pending dates, the date handled, its status."""
     error, ran = None, False
-    for item in sorted(api.context_pending(cfg), key=lambda i: str(i.get("date")), reverse=True):
+    out = {} if out is None else out
+    items = [i for i in sorted(api.context_pending(cfg), key=lambda i: str(i.get("date")), reverse=True)
+             if config.DATE_RE.fullmatch(str(i.get("date"))) and not _done(str(i.get("date")))]
+    out.update(pending=[str(i["date"]) for i in items], collected=None,
+               status="cooling" if items else "nothing_pending", audit_file=None)  # cooling: nothing could run
+    for item in items:
         date, employees = str(item.get("date")), item.get("employees") or []
-        if not config.DATE_RE.fullmatch(date) or _done(date):
-            continue
         ids = {str(e.get("id")) for e in employees if isinstance(e, dict)}
         raw_file = _audit(date, "raw")
         if raw_file.exists():  # collected, but not accepted yet: post again, do not collect again
@@ -135,7 +147,7 @@ def context_step(cfg, verbose):
                 raw_file.unlink(missing_ok=True)
                 raw = None
             if raw is not None:
-                post(cfg, date, raw, ids)
+                _outcome(out, date, post(cfg, date, raw, ids), False)
                 continue
         if ran or store.cooling(f"{date}.context"):
             continue
@@ -146,6 +158,7 @@ def context_step(cfg, verbose):
             raw = collect(date, employees, verbose)
         except claude.ClaudeUnavailable as e:
             store.log(f"Context for {date} skipped, not counted: {e}")
+            _outcome(out, date, None, True)
             return f"context failed ({e.__class__.__name__})"
         except claude.ClaudeFailed as e:
             if isinstance(e, claude.ClaudeTimeout):  # a timeout counts; a logged-out or limited claude only waits
@@ -155,12 +168,14 @@ def context_step(cfg, verbose):
                 store.write_private(config.DAYS_DIR / f"{date}.context.cooldown", "")
                 store.log(f"Context for {date} skipped for {config.COOLDOWN_S // 3600} h, not counted: {e}")
             error = error or f"context failed ({e.__class__.__name__})"
+            _outcome(out, date, None, True)
             continue
         except Exception as e:  # noqa: BLE001 — a bad reply is counted
             n = _count_failure(date, e)
             store.log(f"Context for {date} failed (attempt {n}/{config.CONTEXT_MAX_ATTEMPTS}). ({e.__class__.__name__}: {e})")
             error = error or f"context failed ({e.__class__.__name__})"
+            _outcome(out, date, None, True)
             continue
         store.write_private(raw_file, json.dumps(raw, indent=1, ensure_ascii=False) + "\n")
-        post(cfg, date, raw, ids)
+        _outcome(out, date, post(cfg, date, raw, ids), True)
     return error

@@ -40,6 +40,7 @@ def run_all():
     check_manager.check_rejected_and_attempts()
     check_manager.check_poll_roles()
     check_manager.check_manager_consent()
+    check_manager.check_context_action()
     check_manager.check_readonly_flags()
     check_manager.check_readonly_gate()
     check_config.check_day_boundary()
