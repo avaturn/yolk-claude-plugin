@@ -24,7 +24,10 @@ that day, each with its source, after the same privacy filter. The Manager AI tu
 check-in questions, which employees can read. DMs, private channels, 1:1 and board meetings, HR material
 and individual deal amounts are out of scope. `/yolk:setup` asks for a separate consent for this role, and
 leaves if it is declined. A manager reads one team member's daily report with `/yolk:report <employee> [date]`. Sent context is kept in `~/.claude/yolk/audit/context-*`. `/yolk:context` collects it now instead of
-at the next poll (one collector run, newest pending date first).
+at the next poll (one collector run, newest pending date first). `/yolk:context manual` switches the
+automatic collection off (`auto` switches it back on), and `/yolk:context <date> <file.md>` posts a date's context
+from your own markdown file, with no connectors. To redo a day: `/yolk:context manual` → `just redo <id> <date> fresh`
+→ `/yolk:context <date> context.md`.
 
 ## Install
 

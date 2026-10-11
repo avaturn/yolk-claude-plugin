@@ -8,6 +8,9 @@
   heal                        re-point/install the poller if needed; flag missing Full Disk Access (SessionStart hook)
   context                     collect the company context now (manager role; /yolk:context)
   member-report <id> [--date D]  print one team member's daily report (manager role; /yolk:report <employee>)
+  context-roster <date>       the employees waiting for context that day, as JSON (manager role)
+  context-file <date> <file>  post that day's context from the manager's own JSON file (manager role)
+  context-mode manual|auto    manual: a poll does not collect context; auto (default) does
   manager-consent             record the manager's consent to the context collection (/yolk:setup)
   leave                       revoke this device's token
 
@@ -23,10 +26,11 @@ import platform
 import re
 import socket
 import urllib.parse
+from pathlib import Path
 
 from . import VERSION, activity, api, config, manager, poll, schedule, status, store
 
-ACTIONS = ("poll", "claim", "sync", "leave", "summarize", "status", "heal", "manager-consent", "context", "member-report")
+ACTIONS = ("poll", "claim", "sync", "leave", "summarize", "status", "heal", "manager-consent", "context", "member-report", "context-roster", "context-file", "context-mode")
 
 
 def claim(code):
@@ -87,6 +91,54 @@ def context_now(cfg, verbose):
     print(json.dumps(out, indent=1))
 
 
+def _manager_only(cfg):
+    if cfg.get("role") != "manager":
+        raise SystemExit("Only a linked manager can do this.")
+
+
+def _pending_date(cfg, date):
+    _manager_only(cfg)
+    if not config.parse_date(date or ""):
+        raise SystemExit("Give the date as YYYY-MM-DD.")
+    return manager.pending_item(cfg, date)
+
+
+def context_roster(cfg, date):
+    """The employees the server wants context about on `date`, as JSON (for a manual context file)."""
+    item = _pending_date(cfg, date)
+    print(json.dumps({"date": date, "employees": [
+        {k: e.get(k) for k in ("id", "name", "role")} for e in item.get("employees") or []]}, indent=1))
+
+
+def context_file(cfg, date, path):
+    """Post `date`'s context from the manager's own JSON file: no connectors, so no consent step.
+    The file has the body shape minus generated_at, agent_version and privacy_redactions."""
+    item = _pending_date(cfg, date)
+    try:
+        p = Path(path or "")
+        if p.stat().st_size > 1_000_000:
+            raise SystemExit("The context file is too large.")
+        raw = json.loads(p.read_text())
+    except (OSError, ValueError):
+        raise SystemExit("Give a readable JSON file with the context.") from None
+    if not isinstance(raw, dict):
+        raise SystemExit("The context file must hold a JSON object.")
+    ids = {str(e.get("id")) for e in item.get("employees") or [] if isinstance(e, dict)}
+    shaped = manager.shape(raw, ids)
+    status = manager.post(cfg, date, raw, ids)
+    print(json.dumps({"date": date, "status": status or "failed", "goals": len(shaped["goals"]),
+                      "facts": {e["employee_id"]: len(e["facts"]) for e in shaped["employees"]}}, indent=1))
+
+
+def context_mode(cfg, mode):
+    """`manual`: a poll does not collect context (only /yolk:context does); `auto` (default): it does."""
+    _manager_only(cfg)
+    if mode not in ("manual", "auto"):
+        raise SystemExit("Give manual or auto.")
+    store.write_private(config.CONFIG_FILE, json.dumps({**cfg, "context_mode": mode}, indent=1) + "\n")
+    store.log(f"Context collection is now {mode}.")
+
+
 def member_report(cfg, employee_id, date):
     """The `member-report` action (manager only): print one team member's report. Nothing is saved:
     it is another person's data."""
@@ -141,6 +193,9 @@ COMMANDS = {
     "manager-consent": lambda cfg, a: manager_consent(cfg),
     "context": lambda cfg, a: locked(lambda: context_now(cfg, a.verbose)),
     "member-report": lambda cfg, a: member_report(cfg, a.code, a.date),
+    "context-roster": lambda cfg, a: context_roster(cfg, a.code),
+    "context-file": lambda cfg, a: locked(lambda: context_file(cfg, a.code, a.extra)),
+    "context-mode": lambda cfg, a: context_mode(cfg, a.code),
     "sync": lambda cfg, a: sync(cfg),
     "status": lambda cfg, a: print(json.dumps(status.wait(cfg, a.wait) if a.wait else status.report(cfg), indent=1)),
     "summarize": lambda cfg, a: locked(lambda: activity.summarize_cli(cfg, a.date, a.limit, a.verbose)),
@@ -152,6 +207,7 @@ def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", nargs="?", default="poll", choices=ACTIONS)
     ap.add_argument("code", nargs="?", help="invite code (claim) or employee id (member-report)")
+    ap.add_argument("extra", nargs="?", help="context-file only: the JSON file")
     ap.add_argument("--date", help="YYYY-MM-DD (summarize, member-report only; default: every missing day)")
     ap.add_argument("--limit", type=int, default=config.SUMMARY_BACKFILL_DAYS,
                     help="summarize only: build at most N missing days, newest first")
@@ -160,8 +216,10 @@ def parse_args():
     a = ap.parse_args()
     if a.date and a.action not in ("summarize", "member-report"):
         ap.error("--date only applies to summarize and member-report")
-    if a.action in ("claim", "member-report") and not a.code:
-        ap.error(f"{a.action} needs the {'invite code' if a.action == 'claim' else 'employee id'}")
+    needs = {"claim": "the invite code", "member-report": "the employee id", "context-roster": "the date",
+             "context-file": "the date and the JSON file", "context-mode": "manual or auto"}
+    if a.action in needs and not a.code or a.action == "context-file" and not a.extra:
+        ap.error(f"{a.action} needs {needs[a.action]}")
     return a
 
 

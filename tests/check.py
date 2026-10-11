@@ -42,6 +42,7 @@ def run_all():
     check_manager.check_manager_consent()
     check_manager.check_context_action()
     check_manager.check_member_report()
+    check_manager.check_manual_context()
     check_manager.check_readonly_flags()
     check_manager.check_readonly_gate()
     check_config.check_day_boundary()

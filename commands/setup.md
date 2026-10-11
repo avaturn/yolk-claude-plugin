@@ -20,6 +20,7 @@ Set up Yolk on this Mac. These are the approval moments (step 1; step 4b for a m
    - Only business-level facts with their sources, and the company goals, are sent to the Yolk server. No DMs, private channels, 1:1 meetings, board or investor material, HR material or individual deal amounts are to be used, and nobody is quoted.
    - The manager can read each team member's daily report with `/yolk:report <employee>`.
    - Employees can read the check-in questions that the Manager AI generates from these facts.
+   - The manager can switch the automatic collection off with `/yolk:context manual`, and then post a date's context from their own markdown file with `/yolk:context <date> <file>` (no connectors are used for that).
    - Everything sent is kept in `~/.claude/yolk/audit/context-*` (`.raw.json` before the privacy filter, `.sent.json` as sent).
    If the user agrees, run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/employee_runner.py" manager-consent` (until then the plugin does not collect). If the user declines, run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/employee_runner.py" leave` and stop: nothing is installed.
 5. **Check `python3 --version` and `claude --version`;** help install the Claude Code CLI if it is missing.

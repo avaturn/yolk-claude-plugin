@@ -126,6 +126,15 @@ def _outcome(out, date, status, replace):
         out.update(collected=date, status=status, audit_file=str(f) if f.exists() else None)
 
 
+def pending_item(cfg, date):
+    """The server's pending entry for `date` (its employees), or exit with why not."""
+    for item in api.context_pending(cfg):
+        if str(item.get("date")) == date:
+            return item
+    raise SystemExit(f"{date} is not waiting for context. To redo a day with new context run "
+                     f"`just redo <id> <date> fresh` on the server first.")
+
+
 def context_step(cfg, verbose, out=None):
     """Post the context of every pending date, newest first, with at most ONE collector run per poll
     (the run holds .lock). Re-posting a saved raw body costs no run. Returns an error label or None.

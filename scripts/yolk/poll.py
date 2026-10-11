@@ -4,7 +4,7 @@
   2. send answers saved by an earlier run
   3. fetch briefs, heartbeat   (cheap calls first: a 25-minute investigation must not delay them)
   4. prune old raw day files
-  4b. manager role with context_consent only: collect and post the context of the pending dates
+  4b. manager role with context_consent and context_mode auto only: collect and post the context of the pending dates
   5. fetch the pending question sets; answer each (its day's report first)
   6. only now fill in the reports of the other missing days, BACKFILL_PER_POLL at a time
   7. heartbeat again if there was anything to report
@@ -53,7 +53,7 @@ def poll_once(cfg, verbose):
         profile = config.load_profile()
         today = config.summary_today(cfg)
         # manager role: context unblocks the whole team, so it goes before this person's own answers
-        error = manager.context_step(cfg, verbose) if cfg.get("role") == "manager" and cfg.get("context_consent") else None
+        error = manager.context_step(cfg, verbose) if cfg.get("role") == "manager" and cfg.get("context_consent") and cfg.get("context_mode", "auto") == "auto" else None
         tried = set()
         sets = api.pending(cfg)
         store.set_status(open_check_ins=sorted({str(q.get("date")) for q in sets}))

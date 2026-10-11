@@ -337,3 +337,75 @@ def check_member_report():
     text = (config.PLUGIN_ROOT / "commands" / "report.md").read_text()
     assert "days/<date>.summary.json" in text and "never sent to Yolk or your manager" in text and "[YYYY-MM-DD]" in text
     assert "member-report" in text and not (config.PLUGIN_ROOT / "commands" / "member-report.md").exists()
+
+
+def check_manual_context():
+    import contextlib
+    import io
+    import types
+
+    def act(name, cfg, stub, code, extra=None):
+        buf = io.StringIO()
+        try:
+            with stub, contextlib.redirect_stdout(buf):
+                cli.COMMANDS[name](cfg, types.SimpleNamespace(code=code, extra=extra, verbose=False))
+            err = None
+        except SystemExit as e:
+            err = str(e)
+        text = "\n" + buf.getvalue()                                  # log lines come first, then the JSON
+        return err, (json.loads(text[text.rindex("\n{"):]) if "\n{" in text else None)
+
+    clean_dirs()
+    config.CONFIG_FILE.unlink(missing_ok=True)                    # these actions use the cfg they are given
+    for name, extra in (("context-roster", None), ("context-file", "x.json")):
+        s = Stub(["2026-10-08"])
+        err, _ = act(name, CFG, s, "2026-10-08", extra)
+        assert "Only a linked manager" in err and not s.events
+        err, _ = act(name, MGR, s, "2026-10-01", extra)                       # not pending
+        assert err == ("2026-10-01 is not waiting for context. To redo a day with new context run "
+                       "`just redo <id> <date> fresh` on the server first."), err
+    err, out = act("context-roster", MGR, Stub(["2026-10-08"]), "2026-10-08")
+    assert err is None and out == {"date": "2026-10-08", "employees": [{"id": "matt", "name": "Matt Rossi", "role": "AE"}]}
+    # a manager without consent can post a file
+    nocons = {k: v for k, v in MGR.items() if k != "context_consent"}
+    f = config.YOLK_HOME / "ctx.json"
+    body = {"goals": [{"id": "x", "text": "Ship v0.1", "source": "manual: ctx.md", "confidence": "high"}],
+            "employees": [{"employee_id": "matt", "facts": [{"text": "Closed deal prep sk-ant-abcdefghij1234", "source": "manual: ctx.md"}]},
+                          {"employee_id": "ghost", "facts": [{"text": "x", "source": "y"}]}]}
+    f.write_text(json.dumps(body))
+    for status, want, audit in ((201, "sent", "sent"), (409, "already_received", "sent"), (422, "rejected", "rejected")):
+        clean_dirs()
+        s = Stub(["2026-10-08"], post_status=status)
+        err, out = act("context-file", nocons, s, "2026-10-08", str(f))
+        assert err is None and out == {"date": "2026-10-08", "status": want, "goals": 1, "facts": {"matt": 1}}, out
+        sent = s.posts[0][1]
+        assert sent["goals"][0]["id"] == "g1" and "sk-ant" not in json.dumps(sent) and sent["privacy_redactions"] == ["secret_pattern"]
+        assert [e["employee_id"] for e in sent["employees"]] == ["matt"] and not s.collected
+        assert (config.AUDIT_DIR / f"context-2026-10-08.{audit}.json").exists() and not list(config.OUTBOX_DIR.glob("*"))
+    s = Stub(["2026-10-08"], post_status=503)
+    assert act("context-file", nocons, s, "2026-10-08", str(f))[1]["status"] == "failed"
+    err, _ = act("context-file", nocons, Stub(["2026-10-08"]), "2026-10-08", str(config.YOLK_HOME / "nope.json"))
+    assert "readable JSON" in err
+    # the mode switch persists; a poll collects only in auto
+    clean_dirs()
+    store.write_private(config.CONFIG_FILE, json.dumps(MGR))
+    assert act("context-mode", MGR, Stub([]), "bogus")[0] == "Give manual or auto."
+    cli.context_mode(MGR, "manual")
+    cfg = json.loads(config.CONFIG_FILE.read_text())
+    assert cfg["context_mode"] == "manual"
+    with Stub(["2026-10-08"]) as s:
+        poll.poll_once(cfg, False)
+    assert "/v1/context/pending" not in s.events and not s.collected
+    out = act("context", cfg, Stub(["2026-10-08"]), None)[1]                    # run-now still works
+    assert out["status"] == "sent"
+    clean_dirs()
+    for mode in ("auto", None):
+        c = {**MGR, **({"context_mode": mode} if mode else {})}
+        with Stub(["2026-10-08"]) as s:
+            poll.poll_once(c, False)
+        assert s.posts and s.collected, mode
+        clean_dirs()
+    assert act("context-mode", CFG, Stub([]), "manual")[0] == "Only a linked manager can do this."
+    text = (config.PLUGIN_ROOT / "commands" / "context.md").read_text()
+    assert "Never read, print or `cat` `~/.claude/yolk/agent.json`" in text and "context-roster" in text
+    config.CONFIG_FILE.unlink(missing_ok=True)
