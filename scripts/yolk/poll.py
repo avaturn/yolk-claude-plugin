@@ -1,11 +1,12 @@
 """One poll cycle, in a fixed order: answers never wait behind a week of backfill.
 
-  1. send answers saved by an earlier run
-  2. fetch briefs, heartbeat   (cheap calls first: a 25-minute investigation must not delay them)
-  3. prune old raw day files
-  4. fetch the pending question sets; answer each (its day's report first)
-  5. only now fill in the reports of the other missing days, BACKFILL_PER_POLL at a time
-  6. heartbeat again if there was anything to report
+  1. record whether the job has Full Disk Access (Screen Time)
+  2. send answers saved by an earlier run
+  3. fetch briefs, heartbeat   (cheap calls first: a 25-minute investigation must not delay them)
+  4. prune old raw day files
+  5. fetch the pending question sets; answer each (its day's report first)
+  6. only now fill in the reports of the other missing days, BACKFILL_PER_POLL at a time
+  7. heartbeat again if there was anything to report
 
 What launchd runs every 20 minutes. The caller holds `.lock`.
 """
@@ -13,7 +14,7 @@ import json
 import shutil
 from datetime import datetime
 
-from . import VERSION, activity, api, checkin, config, store
+from . import VERSION, activity, api, checkin, config, schedule, store
 
 
 def sync_briefs(cfg):
@@ -42,6 +43,7 @@ def heartbeat(cfg, status="ok", error=None):
 def poll_once(cfg, verbose):
     """One cycle; returns how many question sets were answered."""
     with store.tracked_run():
+        schedule.record_full_disk_access()
         checkin.flush_outbox(cfg)
         sync_briefs(cfg)
         heartbeat(cfg)

@@ -6,7 +6,7 @@ or a local server sets them before the first import), the rest is fixed.
 Data kept under YOLK_HOME (default ~/.claude/yolk):
   agent.json              server, device_token, employee_id, timezone, poll_interval_s (0600)
   profile.md              the profile the manager registered
-  status.json             progress of the poll: phases, dates, check-in dates; never content
+  status.json             progress of the poll: phases, dates, check-in dates, Full Disk Access; never content
   briefs/<date>.json      coach briefs (reports/ holds older daily reports, no longer written)
   days/<date>.json        raw collector output of one day (0600, local only)
   days/<date>.summary.json  the daily activity report (0600, local only)
@@ -45,6 +45,8 @@ SUMMARIZER_CHARTER = PLUGIN_ROOT / "charters" / "day-summarizer.md"
 COLLECTORS_DIR = SCRIPTS_DIR / "collectors"
 INSTALL_SCRIPT = SCRIPTS_DIR / "install_schedule.sh"
 LAUNCH_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.yolk.agent.plist"
+SCREEN_TIME_DB = Path.home() / "Library/Application Support/Knowledge/knowledgeC.db"  # must match DB in collectors/screen_time.py
+FDA_HINT_FILE = YOLK_HOME / ".fda_hint"  # its mtime: the day the session was last told Screen Time is blocked
 DEFAULT_YOLK_HOME = Path.home() / ".claude" / "yolk"
 INSTALLED_PLUGINS_DIR = (Path.home() / ".claude" / "plugins").resolve()
 

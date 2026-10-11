@@ -5,7 +5,7 @@
   summarize [--date D | --limit N]  build local daily reports (missing days, or D)
   sync                        fetch briefs + heartbeat
   status [--wait N]           what is happening now (JSON); --wait N waits up to N s for it to finish
-  heal                        re-point/install the poller if needed (SessionStart hook)
+  heal                        re-point/install the poller if needed; flag missing Full Disk Access (SessionStart hook)
   leave                       revoke this device's token
 
 `poll` and `summarize` hold `.lock`. A 401 anywhere means the token is revoked: agent.json is
@@ -115,9 +115,14 @@ def parse_args():
 
 def main():
     a = parse_args()
-    if a.action == "heal":  # SessionStart hook: no network, no dirs, no poll; silent unless it changed something
+    if a.action == "heal":
+        # SessionStart hook: no network, no dirs, no poll. Its stdout reaches the session, so it prints only
+        # what it changed and the Full Disk Access hint
         with contextlib.suppress(Exception):
             schedule.heal_schedule()
+            hint = schedule.full_disk_access_hint()
+            if hint:
+                print(hint)
         return
     store.ensure_dirs()
     if a.action not in ("leave", "status"):  # status is read-only; a heal could unload a running poll

@@ -12,9 +12,9 @@ Modules, from the bottom up (no module imports one below it in this list):
   privacy   the privacy gate and the shape of what is stored or sent
   activity  the daily activity report: collect, summarize, store
   checkin   answer one check-in
+  schedule  launchd install and self-heal
   poll      one poll cycle, in its fixed order
   status    what is happening now
-  schedule  launchd install and self-heal
   cli       the actions and their top-level errors
 
 Developing:

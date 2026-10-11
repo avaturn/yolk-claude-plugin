@@ -35,7 +35,7 @@ def report(cfg):
     answered = {d: t for d, t in (st.get("answered") or {}).items() if time.time() - t < config.ANSWERED_KEEP_S}
     return {"running": lock_held(), "phase": st.get("phase", "idle"), "date": st.get("date"),
             "since": st.get("since"), "last_poll_ended": st.get("last_poll_ended"),
-            "last_error": st.get("last_error"),
+            "last_error": st.get("last_error"), "full_disk_access": st.get("full_disk_access"),
             "reports_ready": _dates(config.DAYS_DIR, ".summary.json"),
             "briefs": _dates(config.BRIEFS_DIR, ".json"), "newest_brief": store.latest_brief(),
             "open_check_ins": open_dates, "answered_recently": sorted(answered)}

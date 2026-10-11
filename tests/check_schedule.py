@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from support import CFG, clean_dirs, agent_log
-from yolk import api, cli, config, poll, schedule
+from yolk import api, cli, config, poll, schedule, store
 
 
 def check_heal_schedule():
@@ -193,17 +193,25 @@ def check_install_script_plist():
     (stub / "launchctl").chmod(0o755)
     env = {"HOME": str(home), "PATH": f"{stub}:/usr/bin:/bin:{Path(sys.executable).parent}", "YOLK_HOME": str(home / ".claude" / "yolk")}
 
+    def script(*args):
+        p = subprocess.run(["bash", str(config.INSTALL_SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60)
+        assert p.returncode == 0, p.stderr
+        return p.stdout.splitlines()
+
     def install(interval=None):
         agent = home / ".claude" / "yolk" / "agent.json"
         agent.parent.mkdir(parents=True, exist_ok=True)
         agent.write_text(json.dumps({} if interval is None else {"poll_interval_s": interval}))
-        p = subprocess.run(["bash", str(config.SCRIPTS_DIR / "install_schedule.sh")], env=env, capture_output=True, text=True, timeout=60)
-        assert p.returncode == 0, p.stderr
+        script()
         return plistlib.loads((home / "Library" / "LaunchAgents" / "com.yolk.agent.plist").read_bytes())
 
     def minutes(plist):
         return [d["Minute"] for d in plist["StartCalendarInterval"]]
+    fda = script("--fda-path")
+    # no side effects (Apple's python3 still writes its own ~/Library/Caches): no YOLK_HOME/bin/launcher.py, no plist, no launchctl
+    assert not (home / ".claude").exists() and not (home / "Library" / "LaunchAgents").exists() and not (home / "launchctl.log").exists()
     plist = install()
+    assert fda == [os.path.realpath(plist["ProgramArguments"][0])], fda   # setup grants what the job runs
     assert minutes(plist) == [0, 20, 40] and "StartInterval" not in plist         # wake-proof calendar schedule
     assert minutes(install(600)) == [0, 10, 20, 30, 40, 50]
     assert minutes(install(3600)) == [0] and minutes(install(7200)) == [0]       # an hour or more: hourly
@@ -215,11 +223,27 @@ def check_install_script_plist():
     assert plist["ProgramArguments"][1] == str(launcher)            # the plist runs the stable launcher
     assert launcher.read_bytes() == (config.SCRIPTS_DIR / "launcher.py").read_bytes()   # ...and it was copied
     assert "employee_runner.py" not in json.dumps(plist["ProgramArguments"])
+    assert schedule.apple_python() in (None, plist["ProgramArguments"][0])   # same rule as the script: else heal loops
     assert "load" in (home / "launchctl.log").read_text()      # went to the stub, not the real launchd
+    # no developer tools: the first python3 on PATH (a link to this one: the /usr/bin shim must not run)
+    (stub / "python3").symlink_to(sys.executable)
+    real_dev = os.environ.get("DEVELOPER_DIR")
+    env["DEVELOPER_DIR"] = os.environ["DEVELOPER_DIR"] = tempfile.mkdtemp(prefix="yolk-devdir-")
+    try:
+        assert schedule.apple_python() is None
+        program = shutil.which("python3", path=env["PATH"])
+        assert install()["ProgramArguments"][0] == program == str(stub / "python3")
+        assert script("--fda-path") == [os.path.realpath(program)]
+    finally:
+        os.environ.pop("DEVELOPER_DIR")
+        if real_dev is not None:
+            os.environ["DEVELOPER_DIR"] = real_dev
     shutil.rmtree(home, ignore_errors=True)
 
 def check_heal_action_and_hook():
     clean_dirs()
+    config.STATUS_FILE.unlink(missing_ok=True)
+    config.FDA_HINT_FILE.unlink(missing_ok=True)
     hook = json.loads((config.PLUGIN_ROOT / "hooks" / "hooks.json").read_text())["hooks"]["SessionStart"][0]
     cmd = hook["hooks"][0]
     assert cmd["type"] == "command" and cmd["command"].endswith('employee_runner.py" heal || true') and cmd["timeout"] <= 30
@@ -240,6 +264,7 @@ def check_heal_action_and_hook():
     xpc = os.environ.pop("XPC_SERVICE_NAME", None)
     network = []
     real_api, api.request = api.request, lambda *a, **k: network.append(a) or (200, {})
+    real_apple = schedule.apple_python
 
     def heal():
         buf = io.StringIO()
@@ -258,6 +283,38 @@ def check_heal_action_and_hook():
         config.CONFIG_FILE.write_text("{}")
         plist("/usr/bin/python3", str(launcher))
         assert heal() == [] and not calls                                  # nothing to change: silent
+        # a python3 whose grant works stays; else the job moves to Apple's, when there is one
+        schedule.apple_python = lambda: "/usr/bin/python3"
+        plist("/opt/homebrew/bin/python3", str(launcher))
+        store.set_status(full_disk_access=True)
+        schedule.heal_schedule()
+        assert not calls
+        for fda in (False, None):                                          # grant lost, or never probed
+            store.set_status(full_disk_access=fda)
+            before = agent_log()
+            schedule.heal_schedule()
+            assert "Full Disk Access does not last" in agent_log()[len(before):]
+        assert len(calls) == 2
+        schedule.apple_python = lambda: None                               # no developer tools: any python3 stays
+        schedule.heal_schedule()
+        assert len(calls) == 2
+        calls.clear()
+        # the hint names what macOS checks (symlinks resolved), once a day, never in the job's own claude -p
+        link = tmp / "python3"
+        link.symlink_to(sys.executable)
+        plist(str(link), str(launcher))
+        assert heal() == []                                                # never denied: silent
+        store.set_status(full_disk_access=False)
+        os.environ["XPC_SERVICE_NAME"] = "com.yolk.agent"
+        assert heal() == []
+        del os.environ["XPC_SERVICE_NAME"]
+        out = heal()
+        assert len(out) == 1 and os.path.realpath(link) in out[0] and str(link) not in out[0] and not calls, out
+        assert heal() == []                                                # ...once a day
+        config.FDA_HINT_FILE.unlink()
+        config.LAUNCH_PLIST.unlink()
+        assert schedule.full_disk_access_hint() is None                    # no plist: no path to name
+        store.set_status(full_disk_access=None)
         plist("/usr/bin/python3", "/old/cache/yolk/yolk/1.6.0/scripts/employee_runner.py")
         out = heal()                                                       # old versioned plist: one line
         assert len(calls) == 1 and len(out) == 1 and "launcher" in out[0], out
@@ -279,9 +336,10 @@ def check_heal_action_and_hook():
         assert heal() == []                                                # an exception never escapes
         assert not network                                                 # no network call at all
     finally:
-        api.request = real_api
+        api.request, schedule.apple_python = real_api, real_apple
         config.LAUNCH_PLIST, schedule.install_schedule, config.PLUGIN_ROOT, config.INSTALLED_PLUGINS_DIR, config.DEFAULT_YOLK_HOME = saved
         config.CONFIG_FILE.unlink(missing_ok=True)
         os.environ["YOLK_HOME"] = str(config.YOLK_HOME)
+        os.environ.pop("XPC_SERVICE_NAME", None)
         if xpc is not None:
             os.environ["XPC_SERVICE_NAME"] = xpc

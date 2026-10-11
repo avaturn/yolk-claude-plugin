@@ -1,7 +1,7 @@
 """Everything the device writes to disk, except agent.json (config) and the answers' content rules.
 
 Writes are atomic and private (0600): a crash or a full disk never leaves a half-written outbox body
-or config. status.json holds only phases, dates and class names, never content.
+or config. status.json holds only phases, dates, class names and the Full Disk Access flag, never content.
 """
 import contextlib
 import json

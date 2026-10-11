@@ -8,13 +8,21 @@ YOLK_HOME="${YOLK_HOME:-$HOME/.claude/yolk}"
 PLIST="$HOME/Library/LaunchAgents/com.yolk.agent.plist"
 OLD_PLIST="$HOME/Library/LaunchAgents/com.hrforai.agent.plist"  # v1.1 git poller
 LOG_DIR="$YOLK_HOME/audit"
+# Apple-signed path that never changes, so its Full Disk Access grant survives updates (Homebrew's path
+# changes on every upgrade). Only when developer tools back the /usr/bin shim: else it opens an install dialog
+DEV="$(xcode-select -p 2>/dev/null || true)"
+if [ -n "$DEV" ] && [ -x "$DEV/usr/bin/python3" ]; then PY_BIN=/usr/bin/python3; else PY_BIN="$(command -v python3)"; fi
+# macOS checks Full Disk Access for the program launchd starts, symlinks resolved: not your terminal,
+# not sys.executable
+FDA_PATH="$("$PY_BIN" -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$PY_BIN")"
+# --fda-path: /yolk:setup grants Full Disk Access before the first poll, so it needs the path without installing
+if [ "${1:-}" = "--fda-path" ]; then echo "$FDA_PATH"; exit 0; fi
 mkdir -p "$LOG_DIR" "$(dirname "$PLIST")" "$YOLK_HOME/bin"
 # launchd runs a launcher at a path that never changes: Claude Code deletes old plugin version dirs
 LAUNCHER="$YOLK_HOME/bin/launcher.py"
 cp "$PLUGIN_ROOT/scripts/launcher.py" "$LAUNCHER"
 
 CLAUDE_BIN="$(command -v claude || true)"
-PY_BIN="$(command -v python3)"
 INTERVAL="$("$PY_BIN" -c 'import json,sys; print(int(json.load(open(sys.argv[1])).get("poll_interval_s", 1200)))' \
   "$YOLK_HOME/agent.json" 2>/dev/null || echo 1200)"
 
@@ -60,6 +68,5 @@ EOF
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 echo "Installed: com.yolk.agent (polls at login, after wake, and at minute(s) ${MINUTES// /,} of every hour). Logs: $LOG_DIR"
-# launchd runs python3 itself, not your terminal: Screen Time needs Full Disk Access for THIS binary
-echo "Full Disk Access (System Settings > Privacy & Security): add $("$PY_BIN" -c 'import os,sys; print(os.path.realpath(sys.executable))')"
+echo "Full Disk Access (System Settings > Privacy & Security): add $FDA_PATH"
 [ -n "$CLAUDE_BIN" ] || echo "WARNING: 'claude' CLI not found on PATH — investigations will fail until it is installed."

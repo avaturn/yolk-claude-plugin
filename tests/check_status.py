@@ -43,11 +43,12 @@ def check_status_and_wait():
         api.request = lambda *a, **k: (_ for _ in ()).throw(urllib.error.URLError("down"))
         assert status.report(CFG)["open_check_ins"] == ["2026-10-01"]
         api.request = fake_api
-        store.set_status(open_check_ins=[])
+        store.set_status(open_check_ins=[], full_disk_access=False)
         (config.DAYS_DIR / "2026-10-05.summary.json").write_text("{}")
         (config.BRIEFS_DIR / "2026-10-04.json").write_text("{}")
         s = status.report(CFG)
         assert s["reports_ready"] == ["2026-10-05"] and s["briefs"] == ["2026-10-04"] and s["newest_brief"] == "2026-10-04"
+        assert s["full_disk_access"] is False
 
         # --wait returns once the lock is released
         helper = hold_lock(1.5)

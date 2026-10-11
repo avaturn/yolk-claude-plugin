@@ -41,6 +41,7 @@ def run_all():
     check_schedule.check_install_script_plist()
     check_launcher.check_launcher()
     check_poll.check_status_phases(scripts_dir)
+    check_poll.check_full_disk_access_probe()
     check_status.check_status_and_wait()
     check_schedule.check_heal_action_and_hook()
     check_store.check_no_reports_dir()

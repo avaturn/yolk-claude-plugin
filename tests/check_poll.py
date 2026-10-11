@@ -5,7 +5,7 @@ import urllib.error
 from datetime import timedelta
 
 from support import CFG, clean_dirs, fake_collectors
-from yolk import activity, api, checkin, claude, config, poll, store
+from yolk import activity, api, checkin, claude, config, poll, schedule, store
 
 
 def check_sync_briefs_and_heartbeat_glob():
@@ -114,7 +114,7 @@ def check_status_phases(scripts):
     assert st["phase"] == "idle" and st["date"] is None and st["last_poll_ended"] and st["last_poll_started"]
     assert st["open_check_ins"] == [] and list(st["answered"]) == [qdate]       # answered: no longer open
     assert set(st) <= {"phase", "date", "since", "last_poll_started", "last_poll_ended",
-                       "open_check_ins", "last_error", "answered"}, set(st)
+                       "open_check_ins", "last_error", "answered", "full_disk_access"}, set(st)
     assert marker not in config.STATUS_FILE.read_text()                               # no summary or answer text
     assert config.STATUS_FILE.stat().st_mode & 0o777 == 0o600
     # a failing run records the class name only
@@ -127,3 +127,31 @@ def check_status_phases(scripts):
         api.request = saved[0]
     st = store.read_status()
     assert st["last_error"] == "URLError" and st["phase"] == "idle" and "secret-host" not in config.STATUS_FILE.read_text()
+
+def check_full_disk_access_probe():
+    """Only a run launchd started records whether it may read the Screen Time database."""
+    clean_dirs()
+    config.STATUS_FILE.unlink(missing_ok=True)
+    readable, locked = config.YOLK_HOME / "readable.db", config.YOLK_HOME / "locked.db"
+    readable.write_text("")
+    locked.write_text("")
+    locked.chmod(0)
+    saved = (config.SCREEN_TIME_DB, os.environ.pop("XPC_SERVICE_NAME", None))
+
+    def probe(db):
+        config.SCREEN_TIME_DB = db
+        schedule.record_full_disk_access()
+        return store.read_status()
+    try:
+        assert "full_disk_access" not in probe(readable)        # a session's run says nothing about the job
+        os.environ["XPC_SERVICE_NAME"] = "com.yolk.agent"
+        assert probe(readable)["full_disk_access"] is True
+        assert probe(locked)["full_disk_access"] is False
+        assert probe(config.YOLK_HOME / "missing.db")["full_disk_access"] is None   # no database
+    finally:
+        config.SCREEN_TIME_DB = saved[0]
+        os.environ.pop("XPC_SERVICE_NAME", None)
+        if saved[1] is not None:
+            os.environ["XPC_SERVICE_NAME"] = saved[1]
+        locked.unlink()
+        readable.unlink()
