@@ -271,3 +271,69 @@ def check_context_action():
     finally:
         p.kill()
     assert out is None and not s.events and not s.collected
+
+
+def check_member_report():
+    import contextlib
+    import io
+    import types
+    import urllib.error
+
+    def run(cfg, eid, stub, date=None):
+        buf = io.StringIO()
+        before = sorted(p.relative_to(config.YOLK_HOME) for p in config.YOLK_HOME.rglob("*"))
+        try:
+            with stub, contextlib.redirect_stdout(buf):
+                cli.COMMANDS["member-report"](cfg, types.SimpleNamespace(code=eid, date=date))
+            code = 0
+        except SystemExit as e:
+            code = str(e)
+        assert before == sorted(p.relative_to(config.YOLK_HOME) for p in config.YOLK_HOME.rglob("*"))  # nothing written
+        return code, buf.getvalue()
+
+    class Rep(Stub):
+        def __init__(self, status, body):
+            super().__init__([])
+            self.status, self.body = status, body
+
+        def request(self, cfg, method, path, body=None, auth=True):
+            self.events.append(path)
+            return self.status, self.body
+
+    clean_dirs()
+    for cfg in (CFG, {**CFG, "role": "employee"}):
+        s = Rep(200, {})
+        code, _ = run(cfg, "yoav", s)
+        assert "Only a linked manager can read" in code and not s.events
+    for bad in ("", "../x", "Yo av", "-a", "a" * 65):
+        s = Rep(200, {})
+        code, _ = run(MGR, bad, s)
+        assert "Give the employee id" in code and not s.events, bad
+    s = Rep(200, {})
+    assert "YYYY-MM-DD" in run(MGR, "yoav", s, "2026-13-45")[0] and not s.events
+    ok = {"employee_id": "yoav", "name": "Yoav K", "role": "Dev", "date": "2026-10-08", "state": "done",
+          "report_markdown": "# Report\nbody", "report_missing": False}
+    s = Rep(200, ok)
+    code, out = run(MGR, "YOAV", s, "2026-10-08")
+    assert code == 0 and s.events == ["/v1/team/reports/yoav?date=2026-10-08"], s.events
+    assert out == "Manager report on Yoav K (Dev) \u2014 2026-10-08 \u2014 done\n\n# Report\nbody\n", out
+    code, out = run(MGR, "yoav", Rep(200, {**ok, "report_markdown": None, "state": "open"}))
+    assert "No report yet: the check-in is open." in out
+    code, out = run(MGR, "yoav", Rep(200, {**ok, "report_markdown": None, "report_missing": True}))
+    assert "The stored report has expired." in out
+    for detail in ("not found", "employee not found", "no check-in for that date", "no report yet"):
+        code, out = run(MGR, "yoav", Rep(404, {"detail": detail}))
+        assert code == f"Not available: {detail}." and out == "", (code, out)
+
+    def boom(req, timeout=None):  # the server's error body reaches the caller
+        raise urllib.error.HTTPError("u", 404, "nf", {}, io.BytesIO(b'{"detail": "no report yet"}'))
+    real = api.urllib.request.urlopen
+    api.urllib.request.urlopen = boom
+    try:
+        assert api.member_report({"server": "http://x", "device_token": "t"}, "yoav") == (404, {"detail": "no report yet"})
+    finally:
+        api.urllib.request.urlopen = real
+    # /yolk:report keeps its own-report steps, and there is no separate command
+    text = (config.PLUGIN_ROOT / "commands" / "report.md").read_text()
+    assert "days/<date>.summary.json" in text and "never sent to Yolk or your manager" in text and "[YYYY-MM-DD]" in text
+    assert "member-report" in text and not (config.PLUGIN_ROOT / "commands" / "member-report.md").exists()

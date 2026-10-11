@@ -5,6 +5,7 @@ authenticated call raises `Unlinked`: the token was revoked.
 """
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # what "the server cannot be reached" looks like to callers
@@ -29,7 +30,10 @@ def request(cfg, method, path, body=None, auth=True):
     except urllib.error.HTTPError as e:
         if e.code == 401 and auth:
             raise Unlinked() from None
-        return e.code, None
+        try:  # an error body ({"detail": ...}) when the server sent one
+            return e.code, json.loads(e.read())
+        except (ValueError, OSError):
+            return e.code, None
 
 
 def claim(server, invite_code, device):
@@ -55,6 +59,12 @@ def post_context(cfg, date, body):
     """Manager only: post one date's context; returns the HTTP status."""
     status, _ = request(cfg, "POST", f"/v1/context/{date}", body)
     return status
+
+
+def member_report(cfg, employee_id, date=None):
+    """Manager only: one team member's daily report: (status, body). Not stored on disk."""
+    q = f"?date={date}" if date else ""
+    return request(cfg, "GET", f"/v1/team/reports/{urllib.parse.quote(employee_id, safe='')}{q}")
 
 
 def send_answers(cfg, set_id, body):

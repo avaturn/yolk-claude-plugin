@@ -7,6 +7,7 @@
   status [--wait N]           what is happening now (JSON); --wait N waits up to N s for it to finish
   heal                        re-point/install the poller if needed; flag missing Full Disk Access (SessionStart hook)
   context                     collect the company context now (manager role; /yolk:context)
+  member-report <id> [--date D]  print one team member's daily report (manager role; /yolk:report <employee>)
   manager-consent             record the manager's consent to the context collection (/yolk:setup)
   leave                       revoke this device's token
 
@@ -25,7 +26,7 @@ import urllib.parse
 
 from . import VERSION, activity, api, config, manager, poll, schedule, status, store
 
-ACTIONS = ("poll", "claim", "sync", "leave", "summarize", "status", "heal", "manager-consent", "context")
+ACTIONS = ("poll", "claim", "sync", "leave", "summarize", "status", "heal", "manager-consent", "context", "member-report")
 
 
 def claim(code):
@@ -86,6 +87,32 @@ def context_now(cfg, verbose):
     print(json.dumps(out, indent=1))
 
 
+def member_report(cfg, employee_id, date):
+    """The `member-report` action (manager only): print one team member's report. Nothing is saved:
+    it is another person's data."""
+    if cfg.get("role") != "manager":
+        raise SystemExit("Only a linked manager can read team members' reports.")
+    employee_id = (employee_id or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", employee_id):
+        raise SystemExit("Give the employee id, like yoav.")
+    if date and not config.parse_date(date):
+        raise SystemExit("Give the date as YYYY-MM-DD.")
+    code, body = api.member_report(cfg, employee_id, date)
+    body = body if isinstance(body, dict) else {}
+    if code == 404:
+        raise SystemExit(f"Not available: {body.get('detail') or 'not found'}.")
+    if code != 200:
+        raise SystemExit(f"Could not read the report (HTTP {code}).")
+    print(f"Manager report on {body.get('name')} ({body.get('role')}) — {body.get('date')} — {body.get('state')}")
+    if body.get("report_markdown"):
+        print()
+        print(body["report_markdown"])
+    elif body.get("report_missing"):
+        print("The stored report has expired.")
+    else:
+        print(f"No report yet: the check-in is {body.get('state')}.")
+
+
 def sync(cfg):
     poll.sync_briefs(cfg)
     poll.heartbeat(cfg)
@@ -113,6 +140,7 @@ COMMANDS = {
     "leave": lambda cfg, a: leave(cfg),
     "manager-consent": lambda cfg, a: manager_consent(cfg),
     "context": lambda cfg, a: locked(lambda: context_now(cfg, a.verbose)),
+    "member-report": lambda cfg, a: member_report(cfg, a.code, a.date),
     "sync": lambda cfg, a: sync(cfg),
     "status": lambda cfg, a: print(json.dumps(status.wait(cfg, a.wait) if a.wait else status.report(cfg), indent=1)),
     "summarize": lambda cfg, a: locked(lambda: activity.summarize_cli(cfg, a.date, a.limit, a.verbose)),
@@ -123,17 +151,17 @@ COMMANDS = {
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", nargs="?", default="poll", choices=ACTIONS)
-    ap.add_argument("code", nargs="?", help="invite code (claim only)")
-    ap.add_argument("--date", help="YYYY-MM-DD (summarize only; default: every missing day)")
+    ap.add_argument("code", nargs="?", help="invite code (claim) or employee id (member-report)")
+    ap.add_argument("--date", help="YYYY-MM-DD (summarize, member-report only; default: every missing day)")
     ap.add_argument("--limit", type=int, default=config.SUMMARY_BACKFILL_DAYS,
                     help="summarize only: build at most N missing days, newest first")
     ap.add_argument("--wait", type=int, default=0, help="status only: wait up to N seconds")
     ap.add_argument("--verbose", action="store_true")
     a = ap.parse_args()
-    if a.date and a.action != "summarize":
-        ap.error("--date only applies to summarize")
-    if a.action == "claim" and not a.code:
-        ap.error("claim needs the invite code")
+    if a.date and a.action not in ("summarize", "member-report"):
+        ap.error("--date only applies to summarize and member-report")
+    if a.action in ("claim", "member-report") and not a.code:
+        ap.error(f"{a.action} needs the {'invite code' if a.action == 'claim' else 'employee id'}")
     return a
 
 
