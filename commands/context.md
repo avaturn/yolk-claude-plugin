@@ -14,7 +14,7 @@ Company context (manager role). Look at `$ARGUMENTS`. Never read, print or `cat`
 
 ## `manual` or `auto`
 
-Run `context-mode <manual|auto>`, then say what it means: in `auto` (the default) the background job collects context itself with the manager's connectors; in `manual` it does not, and context comes only from `/yolk:context` (run now) or `/yolk:context <date> <file>`. To redo a day: `/yolk:context manual`, then `just redo <id> <date> fresh` on the server, then `/yolk:context <date> context.md`.
+Run `context-mode <manual|auto>`, then say what it means: in `auto` (the default) the background job collects context itself with the manager's connectors; in `manual` it does not, and context comes only from `/yolk:context` (run now) or `/yolk:context <date> <file>`.
 
 ## `<YYYY-MM-DD> <path>`: post a date's context from your own file
 

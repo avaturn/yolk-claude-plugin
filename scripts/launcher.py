@@ -12,7 +12,9 @@ import time
 from pathlib import Path
 
 PLUGINS_DIR = Path.home() / ".claude" / "plugins"
-CACHE_DIR = PLUGINS_DIR / "cache" / "yolk" / "yolk"  # <marketplace>/<plugin>/<version>/
+# The marketplace was renamed yolk -> avaturn. A device that added it before the rename keeps the local
+# name through every update, so it stays yolk@yolk. Cache layout: cache/<marketplace>/<plugin>/<version>/.
+MARKETPLACES = ("avaturn", "yolk")
 
 
 def version_key(path):
@@ -26,13 +28,13 @@ def usable(path):
 
 
 def recorded_paths(plugins_dir):
-    """installPath of every `yolk@yolk` entry in installed_plugins.json (Claude Code's own record
-    of the active install); nothing if the file or the entry is missing or unreadable."""
+    """installPath of every `yolk@<marketplace>` entry in installed_plugins.json (Claude Code's own
+    record of the active install); nothing if the file or the entries are missing or unreadable."""
     try:
-        data = json.loads((plugins_dir / "installed_plugins.json").read_text())
-        entries = data["plugins"]["yolk@yolk"]
+        plugins = json.loads((plugins_dir / "installed_plugins.json").read_text())["plugins"]
+        entries = [e for m in MARKETPLACES for e in plugins.get(f"yolk@{m}", [])]
         return [e["installPath"] for e in entries if isinstance(e, dict) and e.get("installPath")]
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return []
 
 
@@ -42,8 +44,8 @@ def find_runner(plugins_dir=PLUGINS_DIR):
     recorded = sorted((p for p in recorded_paths(plugins_dir) if usable(p)), key=version_key, reverse=True)
     if recorded:
         return Path(recorded[0]) / "scripts" / "employee_runner.py"
-    cache = plugins_dir / "cache" / "yolk" / "yolk"
-    found = sorted((d for d in cache.glob("*/") if d.is_dir() and usable(d)), key=version_key, reverse=True)
+    found = sorted((d for m in MARKETPLACES for d in (plugins_dir / "cache" / m / "yolk").glob("*/")
+                    if d.is_dir() and usable(d)), key=version_key, reverse=True)
     return found[0] / "scripts" / "employee_runner.py" if found else None
 
 
@@ -55,7 +57,7 @@ def main():
             (home / "audit").mkdir(parents=True, exist_ok=True)
             with open(home / "audit" / "agent.log", "a") as f:
                 f.write(f"[yolk {time.strftime('%H:%M:%S')}] launcher: no installed Yolk plugin found "
-                        f"under {CACHE_DIR}; reinstall it with /plugin install yolk@yolk\n")
+                        f"under {PLUGINS_DIR / 'cache'}; reinstall it with /plugin install yolk@avaturn\n")
         except OSError:
             pass
         return

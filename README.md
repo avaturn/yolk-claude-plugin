@@ -1,95 +1,99 @@
 # Yolk
 
-A Claude Code plugin for your organization's daily check-in. Each day your manager's AI asks a few
-questions about how you worked (work monitoring). A background job answers them automatically from
-your own activity data, on your computer, without asking you to review each answer, and shows you the
-daily report and the coach brief it builds for you.
+Yolk is a Claude Code plugin for your team's daily check-in (work monitoring). Each day your manager's
+AI asks a few questions about how you worked. A background job answers them automatically from
+activity data on your computer. It runs every 2 minutes. Yolk also shows you a daily report and a
+coach brief.
 
-## What leaves your computer, and what stays
+You need macOS, Claude Code, and an invite code from your manager.
 
-- **Leaves:** only sanitized answers to the questions from your manager's AI, and the work profile you
-  approve in setup (next point), over HTTPS. The answers are at business level (meeting subjects, document titles, client names). The agent is instructed never to include raw code or file contents, verbatim prompts or chats, email or message bodies, full URLs or secrets; it may paraphrase, judge how the user works with AI, and name work pages by title or domain. A deterministic filter also removes code blocks and secret-shaped strings before anything is sent. Personal activity is reported only as a total.
-- **Leaves when you approve it in setup:** the work profile `/yolk:setup` drafts from your recent Claude
-  Code sessions (or from what you paste or answer). It replaces the current profile (at first, the one your manager wrote); each
-  approved setup run sends it again.
-- **Stays:** your raw activity data (Claude Code sessions, Screen Time, git, browser history of
-  Chrome, Arc, Brave, Edge, Chromium and Vivaldi) and your daily activity reports. Claude
-  processes them under your own account. They are never sent to Yolk or your manager.
-- Everything sent is kept in `~/.claude/yolk/audit/`. No API key is needed.
+## Privacy
 
-## Manager role
+- **Sent to Yolk:** answers to your manager's questions, at business level (meeting subjects, document
+  titles, client names), and the work profile you approve during setup.
+- **Not sent to Yolk or your manager:** your raw activity data (Claude Code sessions, Screen Time, git,
+  browser history, the tools you connected to Claude) and your daily reports. Claude processes them
+  under your own Claude account. Raw data is deleted after 14 days.
+- Yolk is instructed not to include raw code, file contents, verbatim prompts or chats, message
+  bodies, full URLs or secrets. It may paraphrase your work. A filter also removes longer code blocks
+  and secret-like text before sending. Personal activity is reported only as a total.
+- You do not review each answer before it is sent. A copy of everything sent is in
+  `~/.claude/yolk/audit/`.
+- Your manager sees the questions, your answers, your work profile, your coach brief, when your
+  computer last checked in, and a daily report the manager's AI writes from your answers.
 
-A plugin claimed with a **manager** invite code works as an employee plugin and also collects company
-context once per date. It reads the manager's own Claude Code connectors (Linear, GitHub, public Slack search,
-team meetings, planning docs, Notion, Drive, monday boards, CRM/HubSpot) **read-only**: no built-in tools, only an explicit list of read-only
-connector tools. It sends the server company goals and business-level facts about each employee's work
-that day, each with its source, after the same privacy filter. The Manager AI turns them into extra
-check-in questions, which employees can read. DMs, private channels, 1:1 and board meetings, HR material
-and individual deal amounts are out of scope. `/yolk:setup` asks for a separate consent for this role, and
-leaves if it is declined. A manager reads one team member's daily report with `/yolk:report <employee> [date]`. Sent context is kept in `~/.claude/yolk/audit/context-*`. `/yolk:context` collects it now instead of
-at the next poll (one collector run, newest pending date first). `/yolk:context manual` switches the
-automatic collection off (`auto` switches it back on), and `/yolk:context <date> <file.md>` posts a date's context
-from your own markdown file, with no connectors. To redo a day: `/yolk:context manual` → `just redo <id> <date> fresh`
-→ `/yolk:context <date> context.md`.
+`/yolk:setup` shows the full details and asks for your consent.
 
 ## Install
 
-1. In Claude Code: `/plugin marketplace add avaturn/yolk-plugin-agent`, then
-   `/plugin install yolk@yolk`. Open a new session.
-2. Run `/yolk:setup <invite code>` with the code your manager sent. It asks for your consent, links
-   the computer, drafts your work profile from your recent Claude Code sessions for you to approve
-   (only the approved profile is sent; it replaces the current profile, at first the one your manager wrote), and starts a background
-   job (at login, right after the Mac wakes, and every 2 minutes).
-3. Turn on auto-update once: `/plugin` → Marketplaces → `yolk` → Enable auto-update
-   (skip it if your organization manages updates).
+1. In Claude Code, run:
+   ```
+   /plugin marketplace add avaturn/yolk-claude-plugin
+   /plugin install yolk@avaturn
+   ```
+2. Open a new session.
+3. Run `/yolk:setup <invite code>`.
+4. Optional: turn on updates in `/plugin` → Marketplaces → `avaturn` → Enable auto-update.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `/yolk:setup <code>` | Consent, link this computer, approve your work profile, start the background job |
-| `/yolk:brief [date]` | Your coach brief; if it is not ready, says what is happening |
-| `/yolk:report [date]` | Your own daily activity report; a manager: `/yolk:report <employee> [date]` shows that team member's report |
-| `/yolk:context` | Manager only: collect the company context now and show what was sent |
-| `/yolk:leave` | Unlink this computer and stop the background job |
+| `/yolk:setup <code>` | Link this computer and start Yolk |
+| `/yolk:brief [date]` | Show your coach brief |
+| `/yolk:report [date]` | Show your daily report |
+| `/yolk:leave` | Unlink this computer and stop Yolk |
+
+## Manager role
+
+A manager invite code adds the manager role. Setup asks for a separate consent for it. If you decline,
+setup unlinks the computer.
+
+The manager role collects company context once a day. The manager's AI turns this context into
+extra questions for the team, and team members can read these questions.
+
+- **Reads (read-only):** the manager's connected tools: Linear, GitHub, public Slack channels, team
+  meetings, Notion, Google Drive, monday.com, HubSpot.
+- **Sends:** company goals and work facts about each team member, with sources, through the same
+  privacy filter. It does not quote people.
+- **Skips:** direct messages and private channels. It is also instructed to skip 1:1, board and
+  investor meetings, HR material, and individual deal amounts.
+
+| Command | What it does |
+|---|---|
+| `/yolk:context` | Collect the context now |
+| `/yolk:context manual` | Stop automatic collection (`auto` starts it again) |
+| `/yolk:context <date> <file.md>` | Send the context for a date from your own file |
+| `/yolk:report <member> [date]` | Show the manager's AI report on a team member |
 
 ## Uninstall
 
-`/yolk:leave`, then `claude plugin uninstall yolk@yolk`. After `/yolk:leave` nothing prunes
-`~/.claude/yolk/` any more: the raw data in `days/` stays until you delete that folder.
-
-## Troubleshooting
-
-- Run the background job now: `launchctl kickstart gui/$(id -u)/com.yolk.agent`
-- Logs: `~/.claude/yolk/audit/agent.log` and `poller.log`.
-- What is happening: `python3 ~/.claude/yolk/bin/launcher.py status`
-- Screen Time missing: if `status` shows `"full_disk_access": false`, grant Full Disk Access to the
-  path `bash <plugin>/scripts/install_schedule.sh --fda-path` prints, or the session hint names
-  (usually `.../Python3.framework/Versions/Current/Resources/Python.app`).
+Run `/yolk:leave`, then `claude plugin uninstall yolk@avaturn` in a terminal. Your local data stays in
+`~/.claude/yolk/` until you delete that folder.
 
 ## For admins
 
-Register the marketplace on every machine, keep it up to date and optionally install the plugin
-(managed settings; see [the docs](https://code.claude.com/docs/en/plugins/org)):
+To add the plugin on every computer, use
+[managed settings](https://code.claude.com/docs/en/plugins/org):
 
 ```json
 {
   "extraKnownMarketplaces": {
-    "yolk": {
-      "source": { "source": "github", "repo": "avaturn/yolk-plugin-agent" },
+    "avaturn": {
+      "source": { "source": "github", "repo": "avaturn/yolk-claude-plugin" },
       "autoUpdate": true
     }
   },
-  "enabledPlugins": { "yolk@yolk": true }
+  "enabledPlugins": { "yolk@avaturn": true }
 }
 ```
 
-The repo is private: each machine needs git access to it. Users still run `/yolk:setup <code>`.
+Each user still runs `/yolk:setup <code>`.
 
-Screen Time needs Full Disk Access, which MDM can grant without user action with a PPPC profile
-(Privacy Preferences Policy Control; needs user-approved MDM): service `SystemPolicyAllFiles`,
-`Identifier` `com.apple.python3`, `IdentifierType` `bundleID`, `CodeRequirement`
-`identifier "com.apple.python3" and anchor apple`, `Allowed` `true`. It applies when developer tools
-(Command Line Tools or Xcode) are installed (the job then runs Apple's `Python.app`). The grant covers
-anything launchd starts as Apple's `Python.app` executable, so any code running as the user could add
-such a job and get Full Disk Access; decide with that in mind.
+### Troubleshooting
+
+- Status: `python3 ~/.claude/yolk/bin/launcher.py status`
+- Run the background job now: `launchctl kickstart gui/$(id -u)/com.yolk.agent`
+- Logs: `~/.claude/yolk/audit/agent.log` and `poller.log`
+- Screen Time missing (`"full_disk_access": false` in status): grant Full Disk Access to the path
+  that a new Claude Code session shows. It is usually Apple's `Python.app`.

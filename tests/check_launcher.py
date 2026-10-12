@@ -40,6 +40,15 @@ def check_launcher():
     assert L.find_runner(plugins).parent.parent.name == "1.6.1"
     (plugins / "installed_plugins.json").write_text("{broken")                  # unreadable: fall back
     assert L.find_runner(plugins).parent.parent.name == "1.6.1"
+    # devices that added the marketplace before the rename stay yolk@yolk: both names are found
+    both = Path(tempfile.mkdtemp(prefix="yolk-cache-"))
+    for m, v in (("yolk", "1.8.6"), ("avaturn", "1.8.5"), ("avaturn", "1.8.7")):
+        (both / "cache" / m / "yolk" / v / "scripts").mkdir(parents=True)
+        (both / "cache" / m / "yolk" / v / "scripts" / "employee_runner.py").write_text("")
+    assert L.find_runner(both).parent.parent.name == "1.8.7"                    # newest across both caches
+    (both / "installed_plugins.json").write_text(json.dumps({"plugins": {"yolk@avaturn": [
+        {"installPath": str(both / "cache" / "avaturn" / "yolk" / "1.8.5")}]}}))
+    assert L.find_runner(both).parent.parent.name == "1.8.5"                    # the yolk@avaturn record wins
     # nothing found: one log line in agent.log, exit 0 (no exec)
     home = Path(tempfile.mkdtemp(prefix="yolk-lh-"))
     old = (L.find_runner, os.environ.get("YOLK_HOME"))

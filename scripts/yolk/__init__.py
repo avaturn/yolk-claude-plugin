@@ -25,9 +25,9 @@ Developing:
   python3 tests/check.py             all checks (unit, one temp YOLK_HOME)
   python3 tests/check_baseline.py    one full poll against a stub API, compared with tests/baseline.json
   YOLK_SERVER=http://localhost:8000  point a local checkout at a local server (plain HTTP only for loopback)
-  Claude Code runs a cached copy (~/.claude/plugins/cache/yolk/yolk/<version>/); after editing a checkout
-  bump the version in .claude-plugin/plugin.json and reinstall: `claude plugin uninstall yolk@yolk &&
-  claude plugin install yolk@yolk`.
+  Claude Code runs a cached copy (~/.claude/plugins/cache/avaturn/yolk/<version>/); after editing a checkout
+  bump the version in .claude-plugin/plugin.json and reinstall: `claude plugin uninstall yolk@avaturn &&
+  claude plugin install yolk@avaturn` (`yolk@yolk` if the marketplace was added before the rename).
 
 Modules call each other as `module.function(...)`, never `from module import function`, so a test
 can patch one name in one place.
