@@ -34,7 +34,7 @@ from your own markdown file, with no connectors. To redo a day: `/yolk:context m
 1. In Claude Code: `/plugin marketplace add avaturn/yolk-plugin-agent`, then
    `/plugin install yolk@yolk`. Open a new session.
 2. Run `/yolk:setup <invite code>` with the code your manager sent. It asks for your consent, links
-   the computer and starts a background job (at login, right after the Mac wakes, and every 20 minutes).
+   the computer and starts a background job (at login, right after the Mac wakes, and every 2 minutes).
 3. Turn on auto-update once: `/plugin` → Marketplaces → `yolk` → Enable auto-update
    (skip it if your organization manages updates).
 

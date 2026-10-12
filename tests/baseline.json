@@ -126,7 +126,6 @@
      "device_token": null,
      "employee_id": null,
      "name": null,
-     "poll_interval_s": null,
      "server": null,
      "timezone": null
     },

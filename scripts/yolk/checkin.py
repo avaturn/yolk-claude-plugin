@@ -92,6 +92,12 @@ def answer(cfg, question_set, profile, today, error, verbose):
     if not config.SET_ID_RE.fullmatch(sid) or (config.OUTBOX_DIR / f"{sid}.json").exists() \
             or (config.AUDIT_DIR / f"{sid}.rejected.json").exists():
         return False, None, error
+    failed = config.AUDIT_DIR / f"{sid}.failed"  # not *.json: no glob reads it
+    try:
+        if time.time() - failed.stat().st_mtime < config.FAILED_SET_RETRY_S:
+            return False, None, error or "investigation failed (waiting to retry)"
+    except OSError:
+        pass
     qdate = str(question_set.get("date"))
     tried = None
     if activity.in_window(qdate, today) and not store.day_done(qdate) and not store.cooling(qdate):
@@ -104,6 +110,7 @@ def answer(cfg, question_set, profile, today, error, verbose):
         raw = investigate(question_set, profile, cfg["timezone"], verbose)
     except Exception as e:  # noqa: BLE001 — one failed set must not block the others
         store.log(f"Investigation failed for {sid}: {e}")
+        failed.touch()
         # class name only: the message can carry unsanitized investigation output
         return False, tried, f"investigation failed ({e.__class__.__name__})"
     (config.AUDIT_DIR / f"{sid}.raw.json").write_text(json.dumps(raw, indent=1, ensure_ascii=False))

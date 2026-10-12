@@ -1,6 +1,5 @@
 #!/bin/bash
-# Install the Yolk Employee Agent background poller (launchd: at load/login, after wake, and every
-# poll_interval_s from ~/.claude/yolk/agent.json, default 20 min).
+# Install the Yolk Employee Agent background poller (launchd: at load/login, after wake, and every 2 minutes).
 set -euo pipefail
 
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,13 +26,12 @@ LAUNCHER="$YOLK_HOME/bin/launcher.py"
 cp "$PLUGIN_ROOT/scripts/launcher.py" "$LAUNCHER"
 
 CLAUDE_BIN="$(command -v claude || true)"
-INTERVAL="$("$PY_BIN" -c 'import json,sys; print(int(json.load(open(sys.argv[1])).get("poll_interval_s", 1200)))' \
-  "$YOLK_HOME/agent.json" 2>/dev/null || echo 1200)"
+INTERVAL=120  # seconds; must match POLL_INTERVAL_S in yolk/config.py
 
 # StartCalendarInterval, not StartInterval: launchd misses StartInterval firings while the Mac sleeps
 # (man launchd.plist), so the first poll after a wake could come up to one interval late; a calendar job
-# missed during sleep runs once, when the Mac wakes. Minutes: every INTERVAL/60 within the hour (0/20/40
-# by default). An interval of an hour or more, or one that does not divide 3600 evenly, falls back to
+# missed during sleep runs once, when the Mac wakes. Minutes: every INTERVAL/60 within the hour (0, 2, ...,
+# 58 at 120). An interval of an hour or more, or one that does not divide 3600 evenly, falls back to
 # hourly at minute 0.
 MINUTES="$("$PY_BIN" -c 'import sys; i = int(sys.argv[1]); print(" ".join(str(m) for m in range(0, 60, i // 60)) if 60 <= i < 3600 and 3600 % i == 0 else "0")' "$INTERVAL")"
 SCHEDULE=""

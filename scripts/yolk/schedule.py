@@ -123,6 +123,8 @@ def heal_schedule():
         reason = "ran an outdated launcher"
     elif not on_calendar:
         reason = "used the old schedule"
+    elif plist["StartCalendarInterval"] != [{"Minute": m} for m in range(0, 60, config.POLL_INTERVAL_S // 60)]:
+        reason = "used an old interval"
     elif not os.path.exists(python := plist["ProgramArguments"][0]):
         reason = "ran a python3 that no longer exists"
     elif python.endswith("/" + config.APPLE_PYTHON_APP) or apple_python() is None:  # xcode-select last: the only subprocess

@@ -15,5 +15,5 @@ def check_claim():
     finally:
         api.request = real
     cfg = json.loads(config.CONFIG_FILE.read_text())
-    assert "linked_on" not in cfg and config.CONFIG_FILE.stat().st_mode & 0o777 == 0o600
+    assert "linked_on" not in cfg and "poll_interval_s" not in cfg and config.CONFIG_FILE.stat().st_mode & 0o777 == 0o600
     config.CONFIG_FILE.unlink()

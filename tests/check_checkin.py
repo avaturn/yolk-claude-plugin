@@ -64,6 +64,29 @@ def check_atomic_and_corrupt_outbox():
     assert (config.OUTBOX_DIR / "qs_1.json").stat().st_mode & 0o777 == 0o600
 
 
+def check_failed_investigation_retry_pace():
+    clean_dirs()
+    runs = []
+
+    def boom(*a):
+        runs.append(1)
+        raise RuntimeError("claude failed")
+    real_inv, checkin.investigate = checkin.investigate, boom
+    qs = {"id": "qs_fail", "date": "2020-01-01", "round": 1, "questions": []}
+    try:
+        for _ in range(2):
+            res = checkin.answer(CFG, qs, "role", date.today(), None, False)
+            assert res[0] is False and res[2].startswith("investigation failed")
+        assert len(runs) == 1 and res[2] == "investigation failed (waiting to retry)"  # the second poll left it alone
+        marker = config.AUDIT_DIR / "qs_fail.failed"
+        old = marker.stat().st_mtime - config.FAILED_SET_RETRY_S - 1
+        os.utime(marker, (old, old))
+        checkin.answer(CFG, qs, "role", date.today(), None, False)
+        assert len(runs) == 2                                          # window over: investigated again
+    finally:
+        checkin.investigate = real_inv
+
+
 def check_send_path_redacts():
     """A fake investigator answer with a secret and a code fence: the outbox file and the POST body are redacted."""
     clean_dirs()

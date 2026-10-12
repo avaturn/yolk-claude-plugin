@@ -38,7 +38,7 @@ def check_heal_schedule():
         config.LAUNCH_PLIST.write_bytes(plistlib.dumps({
             "Label": "com.yolk.agent", "ProgramArguments": list(args),
             "EnvironmentVariables": {"YOLK_HOME": home or str(config.YOLK_HOME)},
-            **(schedule if schedule is not None else {"StartCalendarInterval": [{"Minute": m} for m in (0, 20, 40)]})}))
+            **(schedule if schedule is not None else {"StartCalendarInterval": [{"Minute": m} for m in range(0, 60, 2)]})}))
 
     xpc = os.environ.pop("XPC_SERVICE_NAME", None)
     try:
@@ -76,6 +76,17 @@ def check_heal_schedule():
         plist(apple, str(launcher))
         schedule.heal_schedule()
         assert len(calls) == n0 + 3                                           # current: untouched
+        plist(apple, str(launcher), schedule={"StartCalendarInterval": [{"Minute": m} for m in (0, 20, 40)]})
+        schedule.heal_schedule()
+        assert len(calls) == n0 + 4 and "used an old interval" in agent_log()   # the 20-minute plist of 1.8.4
+        plist(apple, str(launcher))
+        schedule.heal_schedule()
+        assert len(calls) == n0 + 4                                           # a second heal: nothing to do
+        for bad in ({"StartCalendarInterval": {"Minute": 0}}, {"StartCalendarInterval": [{"Hour": 1}]}):
+            plist(apple, str(launcher), schedule=bad)                         # malformed: reinstalled, no crash
+            schedule.heal_schedule()
+        assert len(calls) == n0 + 6
+        plist(apple, str(launcher))
         calls[:] = calls[:n0]
         before = agent_log()
         # a version-pinned plist (1.3 - 1.6.0) migrates to the launcher
@@ -224,10 +235,8 @@ def check_install_script_plist():
         assert fda == [plist["ProgramArguments"][0][:-len("/Contents/MacOS/Python")]], fda
     else:
         assert fda == [os.path.realpath(plist["ProgramArguments"][0])], fda   # setup grants what the job runs
-    assert minutes(plist) == [0, 20, 40] and "StartInterval" not in plist         # wake-proof calendar schedule
-    assert minutes(install(600)) == [0, 10, 20, 30, 40, 50]
-    assert minutes(install(3600)) == [0] and minutes(install(7200)) == [0]       # an hour or more: hourly
-    assert minutes(install(1500)) == [0] and minutes(install(45)) == [0]         # not a divisor of 3600: hourly
+    assert minutes(plist) == list(range(0, 60, 2)) and "StartInterval" not in plist   # wake-proof calendar schedule
+    assert minutes(install(600)) == minutes(install(3600)) == minutes(install(45)) == list(range(0, 60, 2))   # agent.json is ignored
     plist = install()
     assert plist["RunAtLoad"] is True and plist["Label"] == "com.yolk.agent"
     assert plist["EnvironmentVariables"]["YOLK_HOME"] == env["YOLK_HOME"]
@@ -288,7 +297,7 @@ def check_heal_action_and_hook():
     def plist(*args):
         config.LAUNCH_PLIST.write_bytes(plistlib.dumps({"ProgramArguments": list(args),
                                                    "EnvironmentVariables": {"YOLK_HOME": str(config.YOLK_HOME)},
-                                                   "StartCalendarInterval": [{"Minute": m} for m in (0, 20, 40)]}))
+                                                   "StartCalendarInterval": [{"Minute": m} for m in range(0, 60, 2)]}))
     try:
         config.CONFIG_FILE.unlink(missing_ok=True)
         assert heal() == [] and not calls                                  # not linked: silent, nothing installed

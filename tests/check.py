@@ -31,6 +31,7 @@ def run_all():
     check_activity.check_summarize_and_investigate(scripts_dir)
     check_checkin.check_atomic_and_corrupt_outbox()
     check_checkin.check_send_path_redacts()
+    check_checkin.check_failed_investigation_retry_pace()
     check_activity.check_attempt_cap(scripts_dir)
     check_poll.check_poll_order(scripts_dir)
     check_claude.check_claude_flags()

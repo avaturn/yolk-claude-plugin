@@ -1,8 +1,8 @@
 """What is happening now: the `status` action, and `--wait` for the session to be told when it is done.
 
 `running` is a non-blocking flock on `.lock` that is released at once. It can never keep a poll from
-starting; at worst a poll that starts in that instant logs "already in progress" and retries in 20
-minutes.
+starting; at worst a poll that starts in that instant logs "already in progress" and retries at the
+next poll.
 """
 import fcntl
 import time

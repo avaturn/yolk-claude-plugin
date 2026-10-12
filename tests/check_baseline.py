@@ -124,7 +124,7 @@ def device(tmp, server_url):
     yolk.mkdir(parents=True)
     (yolk / "agent.json").write_text(json.dumps({
         "server": server_url, "device_token": "dvc_base", "employee_id": "e1", "name": "Base",
-        "timezone": "Asia/Jerusalem", "poll_interval_s": 1200}))
+        "timezone": "Asia/Jerusalem"}))
     (yolk / "profile.md").write_text("Role: tester\n")
     hist = home / "Library/Application Support/Google/Chrome/Default"
     hist.mkdir(parents=True)

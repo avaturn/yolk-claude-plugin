@@ -1,6 +1,6 @@
 {
   "name": "yolk",
-  "version": "1.8.4",
+  "version": "1.8.5",
   "description": "Answers your manager's AI daily check-in questions about your work, automatically, from your own activity data on your computer. Only sanitized answers leave it; raw data and your reports stay local.",
   "author": {
     "name": "Sergei Sherman",

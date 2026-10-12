@@ -54,8 +54,7 @@ def claim(code):
     emp = body["employee"]
     cfg = {"server": server, "device_token": body["device_token"], "employee_id": emp["id"],
            "role": body.get("role") if body.get("role") in ("employee", "manager") else "employee",
-           "name": emp.get("name"), "timezone": emp.get("timezone") or config.machine_timezone(),
-           "poll_interval_s": body.get("poll_interval_s", 1200)}
+           "name": emp.get("name"), "timezone": emp.get("timezone") or config.machine_timezone()}
     store.write_private(config.CONFIG_FILE, json.dumps(cfg, indent=1) + "\n")
     config.PROFILE_FILE.write_text((emp.get("profile_md") or "").strip() + "\n")
     store.log(f"Linked to {server} as {emp.get('name')} ({emp['id']}), role {cfg['role']}, timezone {cfg['timezone']}.")
@@ -183,7 +182,8 @@ def locked(run):
 
 def poll_cycle(cfg, args):
     n = poll.poll_once(cfg, args.verbose)
-    store.log(f"Done — {n} question set(s) answered.")
+    if n or args.verbose:
+        store.log(f"Done — {n} question set(s) answered.")
 
 
 # action -> handler(cfg, args). Handlers are looked up by name at call time (a lambda, not the

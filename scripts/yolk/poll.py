@@ -9,7 +9,7 @@
   6. only now fill in the reports of the other missing days, BACKFILL_PER_POLL at a time
   7. heartbeat again if there was anything to report
 
-What launchd runs every 20 minutes. The caller holds `.lock`.
+What launchd runs every 2 minutes. The caller holds `.lock`.
 """
 import json
 import shutil
@@ -57,7 +57,7 @@ def poll_once(cfg, verbose):
         tried = set()
         sets = api.pending(cfg)
         store.set_status(open_check_ins=sorted({str(q.get("date")) for q in sets}))
-        if not sets:
+        if not sets and verbose:
             store.log("No pending questions.")
         done = 0
         for question_set in sets:
