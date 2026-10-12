@@ -5,7 +5,8 @@ or a local server sets them before the first import), the rest is fixed.
 
 Data kept under YOLK_HOME (default ~/.claude/yolk):
   agent.json              server, device_token, employee_id, role, timezone (0600)
-  profile.md              the profile the manager registered
+  profile.md              the profile on the server: the user's own once they approved one in /yolk:setup
+                          (`profile`), else the one the manager registered (the claim)
   status.json             progress of the poll: phases, dates, check-in dates, Full Disk Access; never content
   briefs/<date>.json      coach briefs (reports/ holds older daily reports, no longer written)
   days/<date>.json        raw collector output of one day (0600, local only)
@@ -14,7 +15,7 @@ Data kept under YOLK_HOME (default ~/.claude/yolk):
   outbox/<set id>.json    answers saved but not yet accepted by the server
   audit/                  agent.log, <set id>.raw.json (before the privacy gate), <set id>.sent.json,
                           <set id>.failed (an investigation failed; its mtime paces the retry),
-                          summary-<date>.failed.json (a day given up on); manager role:
+                          summary-<date>.failed.json (a day given up on), profile.sent.md; manager role:
                           context-<date>.raw.json / .sent.json / .rejected.json / .failed.json
   bin/launcher.py         what launchd runs (copied by install_schedule.sh)
 
@@ -72,6 +73,11 @@ RAW_KEEP_DAYS = 14          # days/* files older than this are deleted
 ANSWERED_KEEP_S = 6 * 3600  # a check-in answered this recently is still awaiting its brief
 WAIT_POLL_S = 5             # status --wait: check for a running poll this often
 WAIT_SYNC_S = 60            # ...and sync briefs this often while a check-in is open
+PROFILE_SOURCE_DAYS = 30    # profile-sources: sessions active this recently
+PROFILE_MAX_PROJECTS = 30   # ...newest projects first
+PROFILE_EXCERPTS = 5        # ...first prompts per project
+PROFILE_EXCERPT_CHARS = 200
+PROFILE_THIN_SESSIONS = 10  # fewer sessions than this: setup asks Claude chat / the user as well
 
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 SET_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")  # server ids become local file names

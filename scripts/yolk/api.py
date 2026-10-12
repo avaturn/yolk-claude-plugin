@@ -67,6 +67,12 @@ def member_report(cfg, employee_id, date=None):
     return request(cfg, "GET", f"/v1/team/reports/{urllib.parse.quote(employee_id, safe='')}{q}")
 
 
+def put_profile(cfg, profile_md):
+    """Replace this employee's profile with the one they approved: (status, body). 204 stored,
+    422 {"detail": reason}."""
+    return request(cfg, "PUT", "/v1/profile", {"profile_md": profile_md})
+
+
 def send_answers(cfg, set_id, body):
     """Post one set's answers; returns the HTTP status."""
     status, _ = request(cfg, "POST", f"/v1/questions/{set_id}/answers", body)

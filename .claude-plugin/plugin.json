@@ -1,7 +1,7 @@
 {
   "name": "yolk",
-  "version": "1.8.5",
-  "description": "Answers your manager's AI daily check-in questions about your work, automatically, from your own activity data on your computer. Only sanitized answers leave it; raw data and your reports stay local.",
+  "version": "1.8.6",
+  "description": "Answers your manager's AI daily check-in questions about your work, automatically, from your own activity data on your computer. Only sanitized answers and the work profile you approve leave it; raw data and your reports stay local.",
   "author": {
     "name": "Sergei Sherman",
     "email": "sergei@in3d.io"

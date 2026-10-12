@@ -2,8 +2,10 @@
 
 Runs on the employee's device. It answers the server's daily check-in with sanitized text and builds
 the employee's own daily activity report locally; raw activity data and reports never leave the
-device. A plugin claimed with a manager invite code also collects company context (manager.py)
-with the manager's own read-only connectors. No API keys live here.
+device. In /yolk:setup it also sends the work profile the user approved (drafted from their own recent
+Claude Code sessions); it replaces the profile the manager wrote. A plugin claimed with a manager
+invite code also collects company context (manager.py) with the manager's own read-only connectors.
+No API keys live here.
 
 Modules, from the bottom up (no module imports one below it in this list):
   config    paths, limits, the clock, agent.json and profile

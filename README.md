@@ -7,8 +7,11 @@ daily report and the coach brief it builds for you.
 
 ## What leaves your computer, and what stays
 
-- **Leaves:** only sanitized answers to the questions from your manager's AI, over HTTPS, at business
-  level (meeting subjects, document titles, client names). The agent is instructed never to include raw code or file contents, verbatim prompts or chats, email or message bodies, full URLs or secrets; it may paraphrase, judge how the user works with AI, and name work pages by title or domain. A deterministic filter also removes code blocks and secret-shaped strings before anything is sent. Personal activity is reported only as a total.
+- **Leaves:** only sanitized answers to the questions from your manager's AI, and the work profile you
+  approve in setup (next point), over HTTPS. The answers are at business level (meeting subjects, document titles, client names). The agent is instructed never to include raw code or file contents, verbatim prompts or chats, email or message bodies, full URLs or secrets; it may paraphrase, judge how the user works with AI, and name work pages by title or domain. A deterministic filter also removes code blocks and secret-shaped strings before anything is sent. Personal activity is reported only as a total.
+- **Leaves when you approve it in setup:** the work profile `/yolk:setup` drafts from your recent Claude
+  Code sessions (or from what you paste or answer). It replaces the current profile (at first, the one your manager wrote); each
+  approved setup run sends it again.
 - **Stays:** your raw activity data (Claude Code sessions, Screen Time, git, browser history of
   Chrome, Arc, Brave, Edge, Chromium and Vivaldi) and your daily activity reports. Claude
   processes them under your own account. They are never sent to Yolk or your manager.
@@ -34,7 +37,9 @@ from your own markdown file, with no connectors. To redo a day: `/yolk:context m
 1. In Claude Code: `/plugin marketplace add avaturn/yolk-plugin-agent`, then
    `/plugin install yolk@yolk`. Open a new session.
 2. Run `/yolk:setup <invite code>` with the code your manager sent. It asks for your consent, links
-   the computer and starts a background job (at login, right after the Mac wakes, and every 2 minutes).
+   the computer, drafts your work profile from your recent Claude Code sessions for you to approve
+   (only the approved profile is sent; it replaces the current profile, at first the one your manager wrote), and starts a background
+   job (at login, right after the Mac wakes, and every 2 minutes).
 3. Turn on auto-update once: `/plugin` → Marketplaces → `yolk` → Enable auto-update
    (skip it if your organization manages updates).
 
@@ -42,7 +47,7 @@ from your own markdown file, with no connectors. To redo a day: `/yolk:context m
 
 | Command | What it does |
 |---|---|
-| `/yolk:setup <code>` | Consent, link this computer, start the background job |
+| `/yolk:setup <code>` | Consent, link this computer, approve your work profile, start the background job |
 | `/yolk:brief [date]` | Your coach brief; if it is not ready, says what is happening |
 | `/yolk:report [date]` | Your own daily activity report; a manager: `/yolk:report <employee> [date]` shows that team member's report |
 | `/yolk:context` | Manager only: collect the company context now and show what was sent |

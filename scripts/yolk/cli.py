@@ -12,6 +12,8 @@
   context-file <date> <file>  post that day's context from the manager's own JSON file (manager role)
   context-mode manual|auto    manual: a poll does not collect context; auto (default) does
   manager-consent             record the manager's consent to the context collection (/yolk:setup)
+  profile-sources             a digest of the user's own recent Claude Code sessions, as JSON (/yolk:setup; local only)
+  profile <file>              send the profile the user approved; it replaces the manager's (/yolk:setup)
   leave                       revoke this device's token
 
 `poll` and `summarize` hold `.lock`. A 401 anywhere means the token is revoked: agent.json is
@@ -25,12 +27,15 @@ import json
 import platform
 import re
 import socket
+import sys
+import time
 import urllib.parse
+from datetime import datetime
 from pathlib import Path
 
-from . import VERSION, activity, api, config, manager, poll, schedule, status, store
+from . import VERSION, activity, api, config, manager, poll, privacy, schedule, status, store
 
-ACTIONS = ("poll", "claim", "sync", "leave", "summarize", "status", "heal", "manager-consent", "context", "member-report", "context-roster", "context-file", "context-mode")
+ACTIONS = ("poll", "claim", "sync", "leave", "summarize", "status", "heal", "manager-consent", "context", "member-report", "context-roster", "context-file", "context-mode", "profile-sources", "profile")
 
 
 def claim(code):
@@ -138,6 +143,103 @@ def context_mode(cfg, mode):
     store.log(f"Context collection is now {mode}.")
 
 
+def _first_prompt(path, claude_sessions):
+    """The first real user prompt of one session transcript, or None."""
+    with open(path, errors="replace") as f:
+        for line in f:
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(rec, dict) or rec.get("type") != "user":
+                continue
+            content = (rec.get("message") or {}).get("content")
+            if isinstance(content, list):  # VS Code's <ide_opened_file> / <ide_selection> blocks carry code
+                content = [b for b in content if not (isinstance(b, dict) and str(b.get("text", "")).lstrip().startswith("<ide_"))]
+            text = claude_sessions.extract_text(content)
+            if claude_sessions.is_real_user_prompt(rec, text) and "[Request interrupted" not in text:
+                return text
+    return None
+
+
+def profile_sources():
+    """The `profile-sources` action (setup step 4): what the user worked on in Claude Code in the last
+    PROFILE_SOURCE_DAYS days, to draft their profile from. Nothing is sent. The plugin's own headless
+    runs are left out like the summarizer leaves them out: their project path is the plugin directory
+    (this one, or any version under ~/.claude/plugins)."""
+    sys.path.insert(0, str(config.COLLECTORS_DIR))  # the collectors import _common as a top-level module
+    import _common
+    import claude_sessions
+
+    def encoded(p):  # how Claude Code names a project dir
+        return re.sub(r"[^A-Za-z0-9]", "-", str(p))
+
+    own, plugins = encoded(config.PLUGIN_ROOT), encoded(config.INSTALLED_PLUGINS_DIR) + "-"
+    cutoff = time.time() - config.PROFILE_SOURCE_DAYS * 86400
+    projects = []  # (dir, [(mtime, transcript)] newest first)
+    try:
+        dirs = [d for d in claude_sessions.PROJECTS_DIR.iterdir() if d.is_dir()]
+    except OSError:
+        dirs = []
+    for d in dirs:
+        if d.name == own or d.name.startswith(plugins):
+            continue
+        sessions = []
+        for f in d.glob("*.jsonl"):
+            with contextlib.suppress(OSError):
+                if (mtime := f.stat().st_mtime) >= cutoff:
+                    sessions.append((mtime, f))
+        if sessions:
+            projects.append((d, sorted(sessions, key=lambda s: -s[0])))
+    projects.sort(key=lambda p: -p[1][0][0])
+    out = []
+    for d, sessions in projects[:config.PROFILE_MAX_PROJECTS]:
+        prompts = []
+        for _, f in sessions:
+            if len(prompts) == config.PROFILE_EXCERPTS:
+                break
+            with contextlib.suppress(OSError):
+                text = _first_prompt(f, claude_sessions)
+                if text:  # the gate sees the full text, then it is cut (see privacy.py)
+                    prompts.append(" ".join(privacy.sanitize_text(text)[0].split())[:config.PROFILE_EXCERPT_CHARS])
+        out.append({"project": _common.tilde(_common.decode_project_dir(d.name)), "sessions": len(sessions),
+                    "last_active": datetime.fromtimestamp(sessions[0][0]).date().isoformat(),
+                    "first_prompts": prompts})
+    total = sum(len(s) for _, s in projects)
+    return {"days": config.PROFILE_SOURCE_DAYS, "sessions": total,
+            "thin": total < config.PROFILE_THIN_SESSIONS, "projects": out}
+
+
+def send_profile(cfg, path):
+    """The `profile` action (setup step 4): send the profile the user approved. On the server it replaces
+    the one the manager wrote; profile.md changes only once the server has stored it. Nothing is sent
+    that the privacy gate would change: the user approved this exact text."""
+    def rejected(reason):  # setup fixes the draft and asks again
+        print(json.dumps({"status": "rejected", "reason": reason}))
+        raise SystemExit(1)
+
+    try:
+        text = Path(path or "").read_text()
+    except (OSError, ValueError):
+        raise SystemExit("Give a readable markdown file with the profile.") from None
+    text, violations = privacy.sanitize_text(text)
+    text = text.strip()
+    # the gate cuts at 6000 chars, below the server's 20000: refuse rather than send a cut profile
+    if not text or "oversized_answer_truncated" in violations:
+        raise SystemExit("The profile must not be empty or longer than 6000 characters.")
+    if violations:
+        rejected("privacy gate: " + ", ".join(sorted(set(violations))))
+    code, body = api.put_profile(cfg, text)
+    if code == 422:
+        rejected((body if isinstance(body, dict) else {}).get("detail"))
+    if code != 204:
+        raise SystemExit(f"Could not send the profile (HTTP {code}).")
+    store.write_private(config.PROFILE_FILE, text + "\n")
+    store.write_private(config.AUDIT_DIR / "profile.sent.md", text + "\n")
+    store.log(f"Sent the user's own profile ({len(text)} chars); it replaces the manager's.", echo=False)
+    print(json.dumps({"status": "sent"}))
+
+
 def member_report(cfg, employee_id, date):
     """The `member-report` action (manager only): print one team member's report. Nothing is saved:
     it is another person's data."""
@@ -196,6 +298,7 @@ COMMANDS = {
     "context-roster": lambda cfg, a: context_roster(cfg, a.code),
     "context-file": lambda cfg, a: locked(lambda: context_file(cfg, a.code, a.extra)),
     "context-mode": lambda cfg, a: context_mode(cfg, a.code),
+    "profile": lambda cfg, a: send_profile(cfg, a.code),
     "sync": lambda cfg, a: sync(cfg),
     "status": lambda cfg, a: print(json.dumps(status.wait(cfg, a.wait) if a.wait else status.report(cfg), indent=1)),
     "summarize": lambda cfg, a: locked(lambda: activity.summarize_cli(cfg, a.date, a.limit, a.verbose)),
@@ -206,7 +309,8 @@ COMMANDS = {
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", nargs="?", default="poll", choices=ACTIONS)
-    ap.add_argument("code", nargs="?", help="invite code (claim) or employee id (member-report)")
+    ap.add_argument("code", nargs="?", help="invite code (claim), employee id (member-report), date (context-*), "
+                                            "mode (context-mode) or markdown file (profile)")
     ap.add_argument("extra", nargs="?", help="context-file only: the JSON file")
     ap.add_argument("--date", help="YYYY-MM-DD (summarize, member-report only; default: every missing day)")
     ap.add_argument("--limit", type=int, default=config.SUMMARY_BACKFILL_DAYS,
@@ -217,7 +321,8 @@ def parse_args():
     if a.date and a.action not in ("summarize", "member-report"):
         ap.error("--date only applies to summarize and member-report")
     needs = {"claim": "the invite code", "member-report": "the employee id", "context-roster": "the date",
-             "context-file": "the date and the JSON file", "context-mode": "manual or auto"}
+             "context-file": "the date and the JSON file", "context-mode": "manual or auto",
+             "profile": "the markdown file"}
     if a.action in needs and not a.code or a.action == "context-file" and not a.extra:
         ap.error(f"{a.action} needs {needs[a.action]}")
     return a
@@ -234,8 +339,13 @@ def main():
             if hint:
                 print(hint)
         return
+    if a.action == "profile-sources":  # local and read-only: no link, no dirs, no heal
+        print(json.dumps(profile_sources(), indent=1, ensure_ascii=False))
+        return
     store.ensure_dirs()
-    if a.action not in ("leave", "status", "manager-consent"):  # status is read-only; a heal could unload a running poll
+    # status is read-only; a heal could unload a running poll. manager-consent and profile run in setup
+    # before its consent steps: a heal there would install the poller early
+    if a.action not in ("leave", "status", "manager-consent", "profile"):
         schedule.heal_schedule()
     try:
         if a.action == "claim":
