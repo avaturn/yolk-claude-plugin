@@ -73,7 +73,7 @@ def leave(cfg):
     except api.Unlinked:
         pass  # already revoked on the server
     config.CONFIG_FILE.unlink()
-    store.log(f"This Mac is unlinked from Yolk. Briefs, old reports, local summaries and the audit trail stay in {config.YOLK_HOME}.")
+    store.log(f"This Mac is unlinked from Yolk. Briefs, local summaries and the audit trail stay in {config.YOLK_HOME}.")
 
 
 def manager_consent(cfg):

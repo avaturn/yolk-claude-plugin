@@ -1,5 +1,4 @@
-"""store: day files, pruning, briefs, no reports/."""
-import shutil
+"""store: day files, pruning, briefs."""
 from datetime import timedelta
 
 from support import CFG, clean_dirs
@@ -24,15 +23,3 @@ def check_prune():
     store.prune_days(CFG)
     assert sorted(p.name for p in config.DAYS_DIR.iterdir()) == sorted([f"{edge}.json", f"{new}.json", "notes.txt", "short"])
 
-def check_no_reports_dir():
-    shutil.rmtree(config.REPORTS_DIR, ignore_errors=True)
-    store.ensure_dirs()
-    assert not config.REPORTS_DIR.exists()                       # not created any more
-    config.REPORTS_DIR.mkdir()
-    store.ensure_dirs()
-    assert not config.REPORTS_DIR.exists()                       # an empty one from an older version goes
-    config.REPORTS_DIR.mkdir()
-    (config.REPORTS_DIR / "2026-10-04.md").write_text("old")
-    store.ensure_dirs()
-    assert (config.REPORTS_DIR / "2026-10-04.md").read_text() == "old"   # old reports are never deleted
-    shutil.rmtree(config.REPORTS_DIR)

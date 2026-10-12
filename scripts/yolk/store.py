@@ -40,8 +40,6 @@ def write_private(path, text):
 def ensure_dirs():
     for d in (config.YOLK_HOME, config.BRIEFS_DIR, config.OUTBOX_DIR, config.AUDIT_DIR, config.DAYS_DIR):
         d.mkdir(parents=True, exist_ok=True)
-    with contextlib.suppress(OSError):
-        config.REPORTS_DIR.rmdir()  # older versions made it; a non-empty one (old reports) stays
     os.chmod(config.DAYS_DIR, 0o700)  # raw collector output: prompt previews, commands, page titles
 
 

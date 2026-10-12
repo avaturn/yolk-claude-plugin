@@ -8,7 +8,7 @@ Data kept under YOLK_HOME (default ~/.claude/yolk):
   profile.md              the profile on the server: the user's own once they approved one in /yolk:setup
                           (`profile`), else the one the manager registered (the claim)
   status.json             progress of the poll: phases, dates, check-in dates, Full Disk Access; never content
-  briefs/<date>.json      coach briefs (reports/ holds older daily reports, no longer written)
+  briefs/<date>.json      coach briefs
   days/<date>.json        raw collector output of one day (0600, local only)
   days/<date>.summary.json  the daily activity report (0600, local only)
   days/<date>.attempts    failed builds of that day so far; .cooldown: claude failed, wait
@@ -38,7 +38,6 @@ CONFIG_FILE = YOLK_HOME / "agent.json"
 PROFILE_FILE = YOLK_HOME / "profile.md"
 STATUS_FILE = YOLK_HOME / "status.json"
 BRIEFS_DIR = YOLK_HOME / "briefs"
-REPORTS_DIR = YOLK_HOME / "reports"  # legacy: only removed when empty
 OUTBOX_DIR = YOLK_HOME / "outbox"
 DAYS_DIR = YOLK_HOME / "days"
 AUDIT_DIR = YOLK_HOME / "audit"

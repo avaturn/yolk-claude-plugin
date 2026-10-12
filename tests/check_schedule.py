@@ -50,11 +50,6 @@ def check_heal_schedule():
         plist(apple, str(launcher))                          # current: untouched
         schedule.heal_schedule()
         assert not calls
-        link = tmp / "linked-bin"
-        link.symlink_to(launcher.parent)
-        plist(apple, str(link / "launcher.py"))              # same file through a symlink: current
-        schedule.heal_schedule()
-        assert not calls
         # a launcher copy that differs from this version's is re-copied (install re-runs)
         plist(apple, str(launcher))
         launcher.write_text("# an older launcher\n")
@@ -62,35 +57,30 @@ def check_heal_schedule():
         assert len(calls) == 1 and "outdated launcher" in agent_log()
         calls.clear()
         launcher.write_bytes((config.SCRIPTS_DIR / "launcher.py").read_bytes())
-        # a 1.6.3 plist (launcher path + StartInterval) migrates to the calendar schedule
         n0 = len(calls)
-        plist(apple, str(launcher), schedule={"StartInterval": 1200})
-        schedule.heal_schedule()
-        assert len(calls) == n0 + 1 and "used the old schedule" in agent_log()
-        plist(apple, str(launcher), schedule={"StartInterval": 1200, "StartCalendarInterval": [{"Minute": 0}]})
-        schedule.heal_schedule()
-        assert len(calls) == n0 + 2                                           # both keys: still old
         plist(apple, str(launcher), schedule={})
         schedule.heal_schedule()
-        assert len(calls) == n0 + 3                                           # neither key
+        assert len(calls) == n0 + 1 and "used an old interval" in agent_log()   # no schedule
         plist(apple, str(launcher))
         schedule.heal_schedule()
-        assert len(calls) == n0 + 3                                           # current: untouched
+        assert len(calls) == n0 + 1                                           # current: untouched
         plist(apple, str(launcher), schedule={"StartCalendarInterval": [{"Minute": m} for m in (0, 20, 40)]})
         schedule.heal_schedule()
-        assert len(calls) == n0 + 4 and "used an old interval" in agent_log()   # the 20-minute plist of 1.8.4
+        assert len(calls) == n0 + 2                                           # the 20-minute plist of 1.6.4 - 1.8.4
         plist(apple, str(launcher))
         schedule.heal_schedule()
-        assert len(calls) == n0 + 4                                           # a second heal: nothing to do
+        assert len(calls) == n0 + 2                                           # a second heal: nothing to do
         for bad in ({"StartCalendarInterval": {"Minute": 0}}, {"StartCalendarInterval": [{"Hour": 1}]}):
             plist(apple, str(launcher), schedule=bad)                         # malformed: reinstalled, no crash
             schedule.heal_schedule()
-        assert len(calls) == n0 + 6
+        assert len(calls) == n0 + 4
+        plist()                                                               # no ProgramArguments: reinstalled, no crash
+        schedule.heal_schedule()
+        assert len(calls) == n0 + 5
         plist(apple, str(launcher))
         calls[:] = calls[:n0]
         before = agent_log()
-        # a version-pinned plist (1.3 - 1.6.0) migrates to the launcher
-        plist("/usr/bin/python3", "/old/cache/yolk/yolk/1.3.1/scripts/employee_runner.py")  # stale
+        plist(apple, str(launcher), schedule={"StartCalendarInterval": [{"Minute": 0}]})  # stale
         os.environ["XPC_SERVICE_NAME"] = "com.yolk.agent"                 # started by launchd itself: never reinstall
         schedule.heal_schedule()
         assert not calls
@@ -104,7 +94,7 @@ def check_heal_schedule():
         schedule.heal_schedule()
         assert len(calls) == 1
         added = agent_log()[len(before):].strip().splitlines()
-        assert len(added) == 1 and "did not use the launcher" in added[0], added          # exactly one log line
+        assert len(added) == 1 and "used an old interval" in added[0], added              # exactly one log line
         # a dev/test run must never re-point the real poller (install_schedule.sh would bake in ITS env)
         plist("/old/x/employee_runner.py", home="/some/other/yolk-home")   # the plist belongs to another YOLK_HOME
         schedule.heal_schedule()
@@ -342,9 +332,9 @@ def check_heal_action_and_hook():
         config.LAUNCH_PLIST.unlink()
         assert schedule.full_disk_access_hint() is None                    # no plist: no path to name
         store.set_status(full_disk_access=None)
-        plist("/usr/bin/python3", "/old/cache/yolk/yolk/1.6.0/scripts/employee_runner.py")
-        out = heal()                                                       # old versioned plist: one line
-        assert len(calls) == 1 and len(out) == 1 and "launcher" in out[0], out
+        plist(str(tmp / "gone" / "python3"), str(launcher))
+        out = heal()                                                       # a stale plist: one line
+        assert len(calls) == 1 and len(out) == 1 and "no longer exists" in out[0], out
         ok[0] = False
         assert len(heal()) == 1                                            # a failing install: still one line, no exception
         config.LAUNCH_PLIST.write_text("junk")

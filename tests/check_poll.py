@@ -17,10 +17,10 @@ def check_sync_briefs_and_heartbeat_glob():
     finally:
         api.request = real
     assert json.loads((config.BRIEFS_DIR / "2026-10-07.json").read_text()) == {"v": 1}
-    assert not (config.REPORTS_DIR / "2026-10-07.md").exists()          # reports are no longer written
-    # 1.4.0 left summary-*.sent.json behind: never "last answered"
+    # a manager's context post and a 1.4.0 summary are never "last answered"
     (config.AUDIT_DIR / "qs_1.sent.json").write_text("{}")
     os.utime(config.AUDIT_DIR / "qs_1.sent.json", (1_700_000_000, 1_700_000_000))
+    (config.AUDIT_DIR / "context-2026-10-06.sent.json").write_text("{}")
     (config.AUDIT_DIR / "summary-2026-10-06.sent.json").write_text("{}")
     sent = []
     api.request = lambda cfg, m, path, body=None, auth=True: (sent.append(body), (204, None))[1]
@@ -60,8 +60,6 @@ def check_poll_order(scripts):
     saved = (api.request, activity.summarize_day, checkin.investigate)
     api.request, activity.summarize_day, checkin.investigate = fake_api, summary_day, investigate
     (config.OUTBOX_DIR / "qs_old.json").write_text("{}")  # an answer saved by an earlier run
-    (config.OUTBOX_DIR / "summaries").mkdir()                # 1.4.0 leftover
-    (config.OUTBOX_DIR / "summaries" / "2026-10-01.json").write_text("{}")
     try:
         assert poll.poll_once(CFG, False) == 2
     finally:
@@ -75,7 +73,6 @@ def check_poll_order(scripts):
     backfill = [e for e in kinds if e[0] == "summary" and e[1] != day(3)]
     assert [e[1] for e in backfill] == [day(1), day(2)], backfill                            # at most 2 more, newest first
     assert all(kinds.index(e) > last_answer for e in backfill), kinds                        # only after the answers
-    assert not (config.OUTBOX_DIR / "summaries").exists()                                         # leftover removed
     assert not any("/v1/summaries" in p for p in paths + [e[1] for e in events if e[0] == "post"])
 
 def check_status_phases(scripts):

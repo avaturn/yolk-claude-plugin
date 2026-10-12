@@ -58,7 +58,6 @@ def run_all():
     check_poll.check_full_disk_access_probe()
     check_status.check_status_and_wait()
     check_schedule.check_heal_action_and_hook()
-    check_store.check_no_reports_dir()
 
 
 if __name__ == "__main__":

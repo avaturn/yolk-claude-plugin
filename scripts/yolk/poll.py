@@ -12,7 +12,6 @@
 What launchd runs every 2 minutes. The caller holds `.lock`.
 """
 import json
-import shutil
 from datetime import datetime
 
 from . import VERSION, activity, api, checkin, config, manager, schedule, store
@@ -31,7 +30,8 @@ def sync_briefs(cfg):
 
 
 def heartbeat(cfg, status="ok", error=None):
-    # 1.4.0 left summary-*.sent.json behind: only answers count as "last answered"
+    # only answers count as "last answered": not the manager's context posts, nor the summary-*.sent.json
+    # that 1.4.0 left in audit/ (never pruned)
     sent = max((p for p in config.AUDIT_DIR.glob("*.sent.json") if not p.name.startswith(("summary-", "context-"))),
                key=lambda p: p.stat().st_mtime, default=None)
     api.heartbeat(cfg, {
@@ -49,7 +49,6 @@ def poll_once(cfg, verbose):
         sync_briefs(cfg)
         heartbeat(cfg)
         store.prune_days(cfg)
-        shutil.rmtree(config.OUTBOX_DIR / "summaries", ignore_errors=True)  # 1.4.0 queued summaries; never sent now
         profile = config.load_profile()
         today = config.summary_today(cfg)
         # manager role: context unblocks the whole team, so it goes before this person's own answers

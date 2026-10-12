@@ -5,7 +5,6 @@ set -euo pipefail
 PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 YOLK_HOME="${YOLK_HOME:-$HOME/.claude/yolk}"
 PLIST="$HOME/Library/LaunchAgents/com.yolk.agent.plist"
-OLD_PLIST="$HOME/Library/LaunchAgents/com.hrforai.agent.plist"  # v1.1 git poller
 LOG_DIR="$YOLK_HOME/audit"
 # macOS checks Full Disk Access for the program launchd starts, symlinks resolved: not your terminal, not
 # sys.executable. Launched directly, Apple's Python.app executable is checked by its bundle ID
@@ -36,12 +35,6 @@ INTERVAL=120  # seconds; must match POLL_INTERVAL_S in yolk/config.py
 MINUTES="$("$PY_BIN" -c 'import sys; i = int(sys.argv[1]); print(" ".join(str(m) for m in range(0, 60, i // 60)) if 60 <= i < 3600 and 3600 % i == 0 else "0")' "$INTERVAL")"
 SCHEDULE=""
 for m in $MINUTES; do SCHEDULE="$SCHEDULE<dict><key>Minute</key><integer>$m</integer></dict>"; done
-
-if [ -f "$OLD_PLIST" ]; then
-  launchctl unload "$OLD_PLIST" 2>/dev/null || true
-  rm -f "$OLD_PLIST"
-  echo "Removed the old git-based poller (com.hrforai.agent)."
-fi
 
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

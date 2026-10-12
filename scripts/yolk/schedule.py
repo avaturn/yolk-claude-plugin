@@ -109,23 +109,17 @@ def heal_schedule():
         return
     if (plist.get("EnvironmentVariables") or {}).get("YOLK_HOME") != str(config.YOLK_HOME) or not _installed_copy():
         return
-    installed = config.YOLK_HOME / "bin" / "launcher.py"
-    points_at_launcher = any(isinstance(a, str) and os.path.realpath(a) == os.path.realpath(installed)
-                             for a in plist.get("ProgramArguments") or [])
     try:
-        current = installed.read_bytes() == (config.SCRIPTS_DIR / "launcher.py").read_bytes()
+        current = (config.YOLK_HOME / "bin" / "launcher.py").read_bytes() == (config.SCRIPTS_DIR / "launcher.py").read_bytes()
     except OSError:
         current = False
-    on_calendar = "StartCalendarInterval" in plist and "StartInterval" not in plist  # StartInterval misses firings during sleep
-    if not points_at_launcher:
-        reason = "did not use the launcher"
-    elif not current:
+    args = plist.get("ProgramArguments")
+    python = args[0] if isinstance(args, list) and args and isinstance(args[0], str) else ""  # malformed: reinstall
+    if not current:
         reason = "ran an outdated launcher"
-    elif not on_calendar:
-        reason = "used the old schedule"
-    elif plist["StartCalendarInterval"] != [{"Minute": m} for m in range(0, 60, config.POLL_INTERVAL_S // 60)]:
+    elif plist.get("StartCalendarInterval") != [{"Minute": m} for m in range(0, 60, config.POLL_INTERVAL_S // 60)]:
         reason = "used an old interval"
-    elif not os.path.exists(python := plist["ProgramArguments"][0]):
+    elif not os.path.exists(python):
         reason = "ran a python3 that no longer exists"
     elif python.endswith("/" + config.APPLE_PYTHON_APP) or apple_python() is None:  # xcode-select last: the only subprocess
         return  # on an Apple Python.app already (any developer dir: no flip-flop), or there is none to move to
